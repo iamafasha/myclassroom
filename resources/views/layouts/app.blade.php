@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Classroom Dashboard</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+        @livewireStyles
+        <style>
+            :root {
+                --sidebar-width: 60px;
+                --panel-list-width: 420px;
+                --bg-main: #ffffff;
+                --text-primary: #111827;
+                --text-secondary: #6B7280;
+                --primary-blue: #2563EB;
+                --border-color: #E5E7EB;
+            }
+
+            * { box-sizing: border-box; }
+
+            body {
+                margin: 0;
+                font-family: 'Inter', system-ui, -apple-system, sans-serif;
+                background-color: var(--bg-main);
+                color: var(--text-primary);
+                display: flex;
+                height: 100vh;
+                overflow: hidden;
+            }
+
+            .sidebar {
+                width: var(--sidebar-width);
+                background-color: #ffffff;
+                border-right: 1px solid var(--border-color);
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                padding: 15px 0;
+                flex-shrink: 0;
+            }
+
+            .sidebar-logo {
+                margin-bottom: 30px;
+                padding: 10px;
+            }
+
+            .sidebar-item {
+                width: 100%;
+                display: flex;
+                justify-content: center;
+                padding: 12px 0;
+                color: #6B7280;
+                cursor: pointer;
+                border-left: 3px solid transparent;
+            }
+
+            .sidebar-item.active {
+                color: #2563EB;
+                background-color: #EFF6FF;
+                border-left-color: #2563EB;
+            }
+
+            .sidebar-item:hover:not(.active) {
+                background-color: #F9FAFB;
+            }
+
+            .main-layout {
+                display: flex;
+                flex: 1;
+                overflow: hidden;
+            }
+
+            .panel-list {
+                width: var(--panel-list-width);
+                background-color: #F9FAFB;
+                border-right: 1px solid var(--border-color);
+                display: flex;
+                flex-direction: column;
+                height: 100%;
+                padding: 20px;
+                overflow-y: auto;
+            }
+
+            .course-selector {
+                margin-bottom: 20px;
+            }
+
+            .select-styled {
+                width: 100%;
+                padding: 10px 15px;
+                border-radius: 8px;
+                border: 1px solid #D1D5DB;
+                background: #F3F4F6;
+                font-size: 13px;
+                font-weight: 500;
+                appearance: none;
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236B7280'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+                background-repeat: no-repeat;
+                background-position: right 10px center;
+                background-size: 16px;
+            }
+
+            .progress-container {
+                margin-bottom: 25px;
+            }
+
+            .progress-card {
+                background: #ffffff;
+                border: 1px solid #FEE2E2;
+                border-radius: 12px;
+                padding: 20px;
+                box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            }
+
+            .progress-bar-wrapper {
+                position: relative;
+                height: 8px;
+                background-color: #FEE2E2;
+                border-radius: 4px;
+                margin: 25px 0 15px;
+            }
+
+            .progress-bar-fill {
+                height: 100%;
+                background-color: #EF4444;
+                border-radius: 4px;
+                width: 21%;
+            }
+
+            .progress-tooltip {
+                position: absolute;
+                top: -30px;
+                left: 21%;
+                transform: translateX(-50%);
+                background-color: #EF4444;
+                color: white;
+                padding: 2px 8px;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: 700;
+            }
+
+            .progress-tooltip::after {
+                content: '';
+                position: absolute;
+                bottom: -4px;
+                left: 50%;
+                transform: translateX(-50%);
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 4px solid #EF4444;
+            }
+
+            .total-info {
+                text-align: center;
+                font-size: 12px;
+                color: #4B5563;
+                background: #F9FAFB;
+                padding: 4px 10px;
+                border-radius: 20px;
+                width: fit-content;
+                margin: 0 auto;
+                border: 1px solid #E5E7EB;
+            }
+
+            .lesson-list {
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+            }
+
+            .lesson-card {
+                border-radius: 8px;
+                padding: 16px;
+                border: 1px solid transparent;
+                cursor: pointer;
+                display: flex;
+                flex-direction: column;
+                transition: transform 0.1s;
+            }
+
+            .lesson-card:active { transform: scale(0.99); }
+
+            .lesson-card.js { background-color: #FEF2F2; border-color: #FEE2E2; }
+            .lesson-card.design { background-color: #F0FDF4; border-color: #DCFCE7; }
+            .lesson-card.active { background-color: #ffffff; border-color: #2563EB; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.1); }
+
+            .lesson-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                margin-bottom: 4px;
+            }
+
+            .lesson-date { font-size: 10px; color: #9CA3AF; text-transform: uppercase; letter-spacing: 0.5px; }
+            .lesson-meta-right { font-size: 10px; text-align: right; }
+            .meta-item { margin-bottom: 2px; }
+            .meta-assignments { color: #EF4444; }
+            .meta-videos { color: #10B981; }
+
+            .lesson-body {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-end;
+            }
+
+            .lesson-title { font-weight: 600; font-size: 13.5px; color: #111827; max-width: 75%; }
+            .active .lesson-title { color: #2563EB; }
+
+            .content-header { margin-bottom: 20px; }
+            .content-breadcrumb { font-size: 11px; font-weight: 700; color: #6B7280; text-transform: uppercase; margin-bottom: 8px; }
+            .content-title { font-size: 24px; font-weight: 800; color: #111827; margin: 0; }
+
+            .tabs-container {
+                display: flex;
+                gap: 30px;
+                border-bottom: 1px solid #F3F4F6;
+                margin-bottom: 30px;
+                margin-top: 20px;
+            }
+
+            .tab-item {
+                padding: 10px 0;
+                font-size: 12px;
+                font-weight: 700;
+                color: #6B7280;
+                cursor: pointer;
+                text-transform: uppercase;
+                border-bottom: 2px solid transparent;
+                transition: all 0.2s;
+            }
+
+            .tab-item.active {
+                color: #2563EB;
+                border-bottom-color: #2563EB;
+            }
+
+            .assignments-list {
+                display: flex;
+                flex-direction: column;
+                gap: 15px;
+            }
+
+            .assignment-card {
+                background: #ffffff;
+                border: 1px solid #E5E7EB;
+                border-radius: 12px;
+                padding: 20px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                transition: box-shadow 0.2s;
+            }
+
+            .assignment-card:hover {
+                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            }
+
+            .assignment-info {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .assignment-name {
+                font-size: 15px;
+                font-weight: 700;
+                color: #1F2937;
+            }
+
+            .assignment-details {
+                display: flex;
+                gap: 20px;
+                align-items: center;
+                font-size: 12px;
+                color: #6B7280;
+            }
+
+            .badge {
+                padding: 2px 8px;
+                border-radius: 4px;
+                font-weight: 700;
+                font-size: 10px;
+                text-transform: uppercase;
+            }
+
+            .badge-medium { background-color: #FFFBEB; color: #D97706; border: 1px solid #FEF3C7; }
+
+            .assignment-score-item { display: flex; align-items: center; gap: 5px; }
+
+            .action-area {
+                display: flex;
+                align-items: center;
+            }
+
+            .btn-solve {
+                background-color: #312E81;
+                color: white;
+                padding: 10px 20px;
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: 600;
+                border: none;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .btn-solved {
+                background-color: #F0FDF4;
+                color: #16A34A;
+                padding: 10px 40px;
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: 600;
+                border: 1px solid #DCFCE7;
+            }
+            
+            .star-icon { color: #F59E0B; margin-left: 5px; }
+        </style>
+
+    </head>
+    <body>
+        <div class="sidebar">
+            <div class="sidebar-logo">
+                <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="32" height="32" rx="8" fill="#2563EB"/>
+                    <path d="M16 8L8 14V24H12V18H20V24H24V14L16 8Z" fill="white"/>
+                </svg>
+            </div>
+            <div class="sidebar-item"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg></div>
+            <div class="sidebar-item active"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.232.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg></div>
+            <div class="sidebar-item"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg></div>
+            <div class="sidebar-item"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg></div>
+            <div class="sidebar-item"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg></div>
+            <div style="flex-grow: 1"></div>
+            <div class="sidebar-item"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg></div>
+        </div>
+
+
+        <div class="main-layout">
+            @yield('content')
+        </div>
+
+        @livewireScripts
+    </body>
+</html>
