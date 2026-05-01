@@ -7,4 +7,14 @@ use Illuminate\Database\Eloquent\Model;
 class Module extends Model
 {
     protected $guarded = [];
+
+    public function course()
+    {
+        return $this->belongsTo(Course::class);
+    }
+
+    public function moduleContents()
+    {
+        return $this->hasMany(ModuleContent::class)->orderBy('id');
+    }
 }

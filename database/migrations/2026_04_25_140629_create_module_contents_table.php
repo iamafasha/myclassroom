@@ -13,9 +13,9 @@ return new class extends Migration
     {
         Schema::create('module_contents', function (Blueprint $table) {
             $table->id();
-            $table->foreignIdFor(Module::class);
-            $table->foreignIdFor(Content::class);
-            $table->foreignIdFor(ModuleContent::class, 'previous_module_content_id')->nullable();
+            $table->foreignIdFor(\App\Models\Module::class);
+            $table->foreignIdFor(\App\Models\Content::class);
+            $table->foreignIdFor(\App\Models\ModuleContent::class, 'previous_module_content_id')->nullable();
             $table->string('label')->nullable();
             $table->string('slug')->nullable();
             $table->timestamps();

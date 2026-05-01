@@ -13,6 +13,7 @@ return new class extends Migration
     {
         Schema::create('modules', function (Blueprint $table) {
             $table->id();
+            $table->foreignIdFor(\App\Models\Course::class)->constrained()->cascadeOnDelete();
             $table->string('title');
             $table->string('slug')->unique();           
             $table->timestamps();
