@@ -166,13 +166,13 @@
                 border: 1px solid #E5E7EB;
             }
 
-            .lesson-list {
+            .module-list {
                 display: flex;
                 flex-direction: column;
                 gap: 12px;
             }
 
-            .lesson-card {
+            .module-card {
                 border-radius: 8px;
                 padding: 16px;
                 border: 1px solid transparent;
@@ -182,33 +182,33 @@
                 transition: transform 0.1s;
             }
 
-            .lesson-card:active { transform: scale(0.99); }
+            .module-card:active { transform: scale(0.99); }
 
-            .lesson-card.js { background-color: #FEF2F2; border-color: #FEE2E2; }
-            .lesson-card.design { background-color: #F0FDF4; border-color: #DCFCE7; }
-            .lesson-card.active { background-color: #ffffff; border-color: #2563EB; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.1); }
+            .module-card.js { background-color: #FEF2F2; border-color: #FEE2E2; }
+            .module-card.design { background-color: #F0FDF4; border-color: #DCFCE7; }
+            .module-card.active { background-color: #ffffff; border-color: #2563EB; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.1); }
 
-            .lesson-header {
+            .module-header {
                 display: flex;
                 justify-content: space-between;
                 align-items: flex-start;
                 margin-bottom: 4px;
             }
 
-            .lesson-date { font-size: 10px; color: #9CA3AF; text-transform: uppercase; letter-spacing: 0.5px; }
-            .lesson-meta-right { font-size: 10px; text-align: right; }
+            .module-date { font-size: 10px; color: #9CA3AF; text-transform: uppercase; letter-spacing: 0.5px; }
+            .module-meta-right { font-size: 10px; text-align: right; }
             .meta-item { margin-bottom: 2px; }
-            .meta-assignments { color: #EF4444; }
+            .meta-contents { color: #EF4444; }
             .meta-videos { color: #10B981; }
 
-            .lesson-body {
+            .module-body {
                 display: flex;
                 justify-content: space-between;
                 align-items: flex-end;
             }
 
-            .lesson-title { font-weight: 600; font-size: 13.5px; color: #111827; max-width: 75%; }
-            .active .lesson-title { color: #2563EB; }
+            .module-title { font-weight: 600; font-size: 13.5px; color: #111827; max-width: 75%; }
+            .active .module-title { color: #2563EB; }
 
             .content-header { margin-bottom: 20px; }
             .content-breadcrumb { font-size: 11px; font-weight: 700; color: #6B7280; text-transform: uppercase; margin-bottom: 8px; }
@@ -238,13 +238,13 @@
                 border-bottom-color: #2563EB;
             }
 
-            .assignments-list {
+            .contents-list {
                 display: flex;
                 flex-direction: column;
                 gap: 15px;
             }
 
-            .assignment-card {
+            .content-card {
                 background: #ffffff;
                 border: 1px solid #E5E7EB;
                 border-radius: 12px;
@@ -255,23 +255,23 @@
                 transition: box-shadow 0.2s;
             }
 
-            .assignment-card:hover {
+            .content-card:hover {
                 box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
             }
 
-            .assignment-info {
+            .content-info {
                 display: flex;
                 flex-direction: column;
                 gap: 10px;
             }
 
-            .assignment-name {
+            .content-name {
                 font-size: 15px;
                 font-weight: 700;
                 color: #1F2937;
             }
 
-            .assignment-details {
+            .content-details {
                 display: flex;
                 gap: 20px;
                 align-items: center;
@@ -289,7 +289,7 @@
 
             .badge-medium { background-color: #FFFBEB; color: #D97706; border: 1px solid #FEF3C7; }
 
-            .assignment-score-item { display: flex; align-items: center; gap: 5px; }
+            .content-score-item { display: flex; align-items: center; gap: 5px; }
 
             .action-area {
                 display: flex;
