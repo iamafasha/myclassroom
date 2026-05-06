@@ -80,7 +80,6 @@
                 display: flex;
                 flex-direction: column;
                 height: 100%;
-                padding: 20px;
                 overflow-y: auto;
             }
 
@@ -101,6 +100,45 @@
                 background-repeat: no-repeat;
                 background-position: right 10px center;
                 background-size: 16px;
+            }
+
+            .custom-select-dropdown {
+                position: absolute;
+                top: 100%;
+                left: 0;
+                right: 0;
+                z-index: 50;
+                background: #ffffff;
+                border: 1px solid #D1D5DB;
+                border-radius: 8px;
+                margin-top: 4px;
+                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+                max-height: 250px;
+                overflow-y: auto;
+            }
+
+            .custom-select-option {
+                padding: 10px 15px;
+                cursor: pointer;
+                font-size: 13px;
+                font-weight: 500;
+                color: var(--text-primary);
+                transition: background-color 0.2s, color 0.2s;
+            }
+
+            .custom-select-option:not(:last-child) {
+                border-bottom: 1px solid #F3F4F6;
+            }
+
+            .custom-select-option:hover {
+                background-color: #EFF6FF;
+                color: #2563EB;
+            }
+
+            .custom-select-option.selected {
+                background-color: #EFF6FF;
+                color: #2563EB;
+                font-weight: 600;
             }
 
             .progress-container {
@@ -322,6 +360,9 @@
             
             .star-icon { color: #F59E0B; margin-left: 5px; }
         </style>
+
+        @vite(['resources/css/app.css', 'resources/js/app.js'])
+        
 
     </head>
     <body>

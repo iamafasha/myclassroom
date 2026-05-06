@@ -6,3 +6,6 @@ Route::get('/', function () {
     return view('classroom');
 });
 
+Route::get('/modules/{module}/content/create', function ($module) {
+    return view('content.create', ['moduleId' => $module]);
+});
