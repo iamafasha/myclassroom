@@ -6,6 +6,7 @@ use App\Models\Content;
 use App\Models\ModuleContent;
 use App\Models\NoteContent;
 use App\Models\PdfNotesContent;
+use App\Models\VideoContent;
 use App\Models\File;
 
 new class extends Component
@@ -19,6 +20,10 @@ new class extends Component
     public $pdfFileId = '';
     public $pdfStartPage = '';
     public $pdfEndPage = '';
+    
+    public $videoFileId = '';
+    public $videoStartTime = '';
+    public $videoEndTime = '';
     
     public function mount($moduleId)
     {
@@ -55,6 +60,21 @@ new class extends Component
             $contentable->start_position = $this->pdfStartPage;
             $contentable->end_position = $this->pdfEndPage;
             $contentable->save();
+        } elseif ($this->type === 'video') {
+            $this->validate([
+                'videoFileId' => 'required|exists:files,id',
+                'videoStartTime' => 'nullable|string',
+                'videoEndTime' => 'nullable|string',
+            ]);
+
+            $file = File::find($this->videoFileId);
+
+            $contentable = new VideoContent();
+            $contentable->name = $this->label;
+            $contentable->file_url = asset('storage/' . $file->file_path);
+            $contentable->start_time = $this->videoStartTime;
+            $contentable->end_time = $this->videoEndTime;
+            $contentable->save();
         }
 
         $content = new Content();
@@ -75,7 +95,8 @@ new class extends Component
     public function with()
     {
         return [
-            'pdfFiles' => File::where('file_type', 'pdf')->get()
+            'pdfFiles' => File::where('file_type', 'pdf')->get(),
+            'videoFiles' => File::whereIn('file_type', ['video', 'mp4', 'mov', 'avi'])->get()
         ];
     }
 };
@@ -88,6 +109,7 @@ new class extends Component
         <select wire:model.live="type" class="border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;">
             <option value="note">Text Note</option>
             <option value="pdf">PDF Document</option>
+            <option value="video">Video Content</option>
         </select>
     </div>
     
@@ -126,6 +148,31 @@ new class extends Component
                 <label class="block text-sm font-medium text-gray-700 mb-1">Read To Page (Optional)</label>
                 <input type="text" wire:model="pdfEndPage" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="e.g. 10">
                 @error('pdfEndPage') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+            </div>
+        </div>
+    @elseif($type === 'video')
+        <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Select Video File</label>
+            <select wire:model="videoFileId" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;">
+                <option value="">-- Choose a Video --</option>
+                @foreach($videoFiles as $file)
+                    <option value="{{ $file->id }}">{{ $file->name }}</option>
+                @endforeach
+            </select>
+            @error('videoFileId') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+            <p class="text-xs text-gray-500 mt-1">If your video is not here, <a href="{{ route('files.index') }}" class="text-indigo-600 hover:underline">upload it in the File Manager</a> first.</p>
+        </div>
+        
+        <div class="flex gap-4 mb-6">
+            <div class="w-1/2">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Start Time (Optional, e.g. 01:20)</label>
+                <input type="text" wire:model="videoStartTime" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="00:00">
+                @error('videoStartTime') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+            </div>
+            <div class="w-1/2">
+                <label class="block text-sm font-medium text-gray-700 mb-1">End Time (Optional, e.g. 05:30)</label>
+                <input type="text" wire:model="videoEndTime" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="00:00">
+                @error('videoEndTime') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
             </div>
         </div>
     @endif
