@@ -24,3 +24,9 @@ Route::get('/content/{moduleContent}', function (App\Models\ModuleContent $modul
     return view('content.show', ['moduleContent' => $moduleContent]);
 })->name('content.show');
 
+Route::post('/content/{moduleContent}/toggle-complete', function (App\Models\ModuleContent $moduleContent) {
+    $moduleContent->is_completed = !$moduleContent->is_completed;
+    $moduleContent->save();
+    return back();
+})->name('content.toggle-complete');
+

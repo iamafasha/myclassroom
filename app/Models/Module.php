@@ -15,6 +15,6 @@ class Module extends Model
 
     public function moduleContents()
     {
-        return $this->hasMany(ModuleContent::class)->orderBy('id');
+        return $this->hasMany(ModuleContent::class)->orderBy('sort_order', 'asc')->orderBy('id', 'asc');
     }
 }

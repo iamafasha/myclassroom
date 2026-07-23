@@ -28,13 +28,18 @@ new class extends Component
                 
                 // If a course was automatically selected, try to select its first module
                 if (!$this->selectedModuleId) {
-                    $firstModule = Module::where('course_id', $this->selectedCourseId)->first();
+                    $firstModule = Module::where('course_id', $this->selectedCourseId)->orderBy('sort_order', 'asc')->orderBy('id', 'asc')->first();
                     if ($firstModule) {
                         $this->selectedModuleId = $firstModule->id;
                     }
                 }
             }
         }
+    }
+
+    public function selectModule($moduleId)
+    {
+        $this->selectedModuleId = $moduleId;
     }
 
     public function createCourse()
@@ -61,13 +66,25 @@ new class extends Component
             return;
         }
 
+        $maxOrder = Module::where('course_id', $this->selectedCourseId)->max('sort_order') ?? 0;
+
         $module = Module::create([
             'course_id' => $this->selectedCourseId,
             'title' => $this->newModuleTitle,
             'slug' => \Illuminate\Support\Str::slug($this->newModuleTitle . '-' . time()),
+            'sort_order' => $maxOrder + 1,
         ]);
 
         return redirect()->route('course.module.show', ['course' => $this->selectedCourseId, 'module' => $module->id]);
+    }
+
+    public function toggleComplete($contentId)
+    {
+        $moduleContent = \App\Models\ModuleContent::find($contentId);
+        if ($moduleContent) {
+            $moduleContent->is_completed = !$moduleContent->is_completed;
+            $moduleContent->save();
+        }
     }
 
     public function deleteContent($contentId)
@@ -112,6 +129,80 @@ new class extends Component
         return redirect()->route('home');
     }
 
+    public function moveModuleUp($moduleId)
+    {
+        $modules = Module::where('course_id', $this->selectedCourseId)->orderBy('sort_order', 'asc')->orderBy('id', 'asc')->get();
+        foreach ($modules as $i => $m) {
+            $m->update(['sort_order' => $i]);
+        }
+        $modules = Module::where('course_id', $this->selectedCourseId)->orderBy('sort_order', 'asc')->orderBy('id', 'asc')->get();
+        $index = $modules->search(fn($m) => $m->id == $moduleId);
+
+        if ($index !== false && $index > 0) {
+            $current = $modules[$index];
+            $previous = $modules[$index - 1];
+
+            $current->update(['sort_order' => $index - 1]);
+            $previous->update(['sort_order' => $index]);
+        }
+    }
+
+    public function moveModuleDown($moduleId)
+    {
+        $modules = Module::where('course_id', $this->selectedCourseId)->orderBy('sort_order', 'asc')->orderBy('id', 'asc')->get();
+        foreach ($modules as $i => $m) {
+            $m->update(['sort_order' => $i]);
+        }
+        $modules = Module::where('course_id', $this->selectedCourseId)->orderBy('sort_order', 'asc')->orderBy('id', 'asc')->get();
+        $index = $modules->search(fn($m) => $m->id == $moduleId);
+
+        if ($index !== false && $index < count($modules) - 1) {
+            $current = $modules[$index];
+            $next = $modules[$index + 1];
+
+            $current->update(['sort_order' => $index + 1]);
+            $next->update(['sort_order' => $index]);
+        }
+    }
+
+    public function moveContentUp($contentId)
+    {
+        if (!$this->selectedModuleId) return;
+        $contents = \App\Models\ModuleContent::where('module_id', $this->selectedModuleId)->orderBy('sort_order', 'asc')->orderBy('id', 'asc')->get();
+        foreach ($contents as $i => $c) {
+            $c->update(['sort_order' => $i]);
+        }
+        $contents = \App\Models\ModuleContent::where('module_id', $this->selectedModuleId)->orderBy('sort_order', 'asc')->orderBy('id', 'asc')->get();
+        $index = $contents->search(fn($c) => $c->id == $contentId);
+
+        if ($index !== false && $index > 0) {
+            $current = $contents[$index];
+            $previous = $contents[$index - 1];
+
+            $current->update(['sort_order' => $index - 1]);
+            $previous->update(['sort_order' => $index]);
+        }
+    }
+
+    public function moveContentDown($contentId)
+    {
+        if (!$this->selectedModuleId) return;
+        $contents = \App\Models\ModuleContent::where('module_id', $this->selectedModuleId)->orderBy('sort_order', 'asc')->orderBy('id', 'asc')->get();
+        foreach ($contents as $i => $c) {
+            $c->update(['sort_order' => $i]);
+        }
+        $contents = \App\Models\ModuleContent::where('module_id', $this->selectedModuleId)->orderBy('sort_order', 'asc')->orderBy('id', 'asc')->get();
+        $index = $contents->search(fn($c) => $c->id == $contentId);
+
+        if ($index !== false && $index < count($contents) - 1) {
+            $current = $contents[$index];
+            $next = $contents[$index + 1];
+
+            $current->update(['sort_order' => $index + 1]);
+            $next->update(['sort_order' => $index]);
+        }
+    }
+
     #[Computed]
     public function courses()
     {
@@ -130,7 +221,7 @@ new class extends Component
         if (!$this->selectedCourseId) {
             return collect();
         }
-        return Module::where('course_id', $this->selectedCourseId)->get();
+        return Module::where('course_id', $this->selectedCourseId)->orderBy('sort_order', 'asc')->orderBy('id', 'asc')->get();
     }
 
     #[Computed]
@@ -193,19 +284,31 @@ new class extends Component
 
         <div class="module-list" style="padding-bottom: 50px;">
             @foreach($this->modules as $module)
-                <a href="{{ route('course.module.show', ['course' => $selectedCourseId, 'module' => $module->id]) }}" wire:navigate class="module-card design group {{ $selectedModuleId == $module->id ? 'active' : '' }}" style="position: relative; text-decoration: none; color: inherit; display: block;">
+                <div wire:click="selectModule({{ $module->id }})" class="module-card design group {{ $selectedModuleId == $module->id ? 'active' : '' }}" style="position: relative; cursor: pointer; user-select: none;">
                     <div class="module-header">
                         <div class="module-date">{{ $module->created_at->format('d F') }}</div>
                     </div>
                     <div class="module-body" style="display: flex; justify-content: space-between; align-items: center;">
                         <div class="module-title">{{ $module->title }}</div>
-                        <button wire:click.prevent="deleteModule({{ $module->id }})" wire:confirm="Are you sure you want to delete this module and its contents?" class="opacity-0 group-hover:opacity-100 transition-opacity" style="background: none; border: none; cursor: pointer; color: #EF4444; padding: 4px;" title="Delete Module">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                        </button>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <button type="button" wire:click.stop="moveModuleUp({{ $module->id }})" class="opacity-0 group-hover:opacity-100 transition-opacity" style="background: #F3F4F6; border: none; border-radius: 4px; padding: 4px; cursor: pointer; color: #4B5563; display: flex; align-items: center; justify-content: center;" title="Move Module Up">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                                </svg>
+                            </button>
+                            <button type="button" wire:click.stop="moveModuleDown({{ $module->id }})" class="opacity-0 group-hover:opacity-100 transition-opacity" style="background: #F3F4F6; border: none; border-radius: 4px; padding: 4px; cursor: pointer; color: #4B5563; display: flex; align-items: center; justify-content: center;" title="Move Module Down">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                                </svg>
+                            </button>
+                            <button type="button" wire:click.stop="deleteModule({{ $module->id }})" wire:confirm="Are you sure you want to delete this module and its contents?" class="opacity-0 group-hover:opacity-100 transition-opacity" style="background: none; border: none; cursor: pointer; color: #EF4444; padding: 4px;" title="Delete Module">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                            </button>
+                        </div>
                     </div>
-                </a>
+                </div>
             @endforeach
 
 
@@ -249,18 +352,41 @@ new class extends Component
     
         <div class="contents-list">
             @foreach($this->contents as $moduleContent)
-                <div class="content-card group" style="width:100%">
+                <div class="content-card group {{ $moduleContent->is_completed ? 'completed' : '' }}" style="width:100%">
                     <div class="content-info">
-                        <div class="content-name">{{ $moduleContent->label ?? 'Unnamed Content' }}</div>
-                        <div class="content-details">
+                        <div class="content-name" style="{{ $moduleContent->is_completed ? 'text-decoration: line-through; color: #6B7280;' : '' }}">
+                            {{ $moduleContent->label ?? 'Unnamed Content' }}
+                        </div>
+                        <div class="content-details" style="margin-top: 4px;">
                             @if($moduleContent->content && $moduleContent->content->contentable)
                                 <span class="badge badge-medium">{{ str_replace('Content', '', class_basename($moduleContent->content->contentable_type)) }}</span>
                             @else
                                 <span class="badge badge-medium">Unknown</span>
                             @endif
+                            
+                            @if($moduleContent->is_completed)
+                                <span style="font-size: 0.75rem; color: #059669; background: #ECFDF5; border: 1px solid #A7F3D0; padding: 2px 8px; border-radius: 9999px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                    Completed
+                                </span>
+                            @endif
                         </div>
                     </div>
-                    <div class="action-area" style="display: flex; gap: 10px; align-items: center;">
+                    <div class="action-area" style="display: flex; gap: 6px; align-items: center;">
+                            <div class="opacity-0 group-hover:opacity-100 transition-opacity" style="display: flex; gap: 4px;">
+                                <button wire:click.stop="moveContentUp({{ $moduleContent->id }})" style="background: #F3F4F6; color: #4B5563; border: none; padding: 8px; border-radius: 0.375rem; cursor: pointer; display: flex; align-items: center; justify-content: center;" title="Move Content Up">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                                    </svg>
+                                </button>
+                                <button wire:click.stop="moveContentDown({{ $moduleContent->id }})" style="background: #F3F4F6; color: #4B5563; border: none; padding: 8px; border-radius: 0.375rem; cursor: pointer; display: flex; align-items: center; justify-content: center;" title="Move Content Down">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                </button>
+                            </div>
                             <button wire:click.stop="deleteContent({{ $moduleContent->id }})" wire:confirm="Are you sure you want to delete this content?" class="opacity-0 group-hover:opacity-100 transition-opacity" style="background: #FEE2E2; color: #EF4444; border: none; padding: 8px; border-radius: 0.375rem; cursor: pointer; display: flex; align-items: center; justify-content: center;" title="Delete Content">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
