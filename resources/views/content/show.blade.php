@@ -332,26 +332,116 @@
             </div>
         @endif
 
-        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #E5E7EB; display: flex; justify-content: flex-end;">
-            <form action="{{ route('content.toggle-complete', $moduleContent->id) }}" method="POST">
-                @csrf
-                @if($moduleContent->is_completed)
-                    <button type="submit" style="background-color: #ECFDF5; color: #059669; border: 1px solid #A7F3D0; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s;">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                        </svg>
-                        Completed (Click to unmark)
-                    </button>
-                @else
-                    <button type="submit" style="background-color: #4F46E5; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s;">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                        </svg>
-                        Mark as Completed
-                    </button>
+        @if($moduleContent->is_exercise)
+            <div style="margin-top: 30px; padding: 24px; border: 1px solid #FCD34D; background: #FFFBEB; border-radius: 12px;">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                    <span style="font-size: 1.25rem;">📝</span>
+                    <h3 style="font-size: 1.1rem; font-weight: 700; color: #92400E; margin: 0;">Exercise Submission Required</h3>
+                </div>
+                
+                @if($errors->has('exercise'))
+                    <div style="background-color: #FEE2E2; color: #DC2626; border: 1px solid #FCA5A5; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 0.875rem;">
+                        {{ $errors->first('exercise') }}
+                    </div>
                 @endif
-            </form>
-        </div>
+
+                @if($moduleContent->submission_link || $moduleContent->submission_file_path || $moduleContent->score)
+                    <div style="background: white; border: 1px solid #FDE68A; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                        <h4 style="font-size: 0.9rem; font-weight: 600; color: #78350F; margin-top: 0; margin-bottom: 8px;">Your Submitted Exercise Details:</h4>
+                        @if($moduleContent->submission_link)
+                            <div style="margin-bottom: 6px; font-size: 0.9rem;">
+                                <strong>Answer Link:</strong> 
+                                <a href="{{ $moduleContent->submission_link }}" target="_blank" rel="noopener noreferrer" style="color: #2563EB; text-decoration: underline;">
+                                    {{ $moduleContent->submission_link }}
+                                </a>
+                            </div>
+                        @endif
+                        @if($moduleContent->submission_file_path)
+                            <div style="margin-bottom: 6px; font-size: 0.9rem;">
+                                <strong>Submitted File:</strong> 
+                                <a href="{{ asset('storage/' . $moduleContent->submission_file_path) }}" target="_blank" style="color: #2563EB; text-decoration: underline;">
+                                    Download File
+                                </a>
+                            </div>
+                        @endif
+                        @if($moduleContent->score)
+                            <div style="font-size: 0.9rem;">
+                                <strong>Score:</strong> 
+                                <span style="font-weight: 700; color: #D97706; background: #FEF3C7; border: 1px solid #FCD34D; padding: 2px 10px; border-radius: 6px;">
+                                    {{ $moduleContent->score }}
+                                </span>
+                            </div>
+                        @endif
+                    </div>
+                @endif
+
+                <form action="{{ route('content.submit-exercise', $moduleContent->id) }}" method="POST" enctype="multipart/form-data">
+                    @csrf
+                    @php
+                        $scoreParts = explode('/', $moduleContent->score ?? '');
+                        $obtained = $scoreParts[0] ?? '';
+                        $total = isset($scoreParts[1]) ? $scoreParts[1] : '';
+                    @endphp
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                        <div>
+                            <label style="display: block; font-size: 0.875rem; font-weight: 600; color: #78350F; margin-bottom: 6px;">Provide Answer Link</label>
+                            <input type="url" name="submission_link" value="{{ old('submission_link', $moduleContent->submission_link) }}" style="width: 100%; padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.875rem; outline: none;" placeholder="https://github.com/... or Google Doc URL">
+                            @error('submission_link') <span style="color: #DC2626; font-size: 0.75rem; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 0.875rem; font-weight: 600; color: #78350F; margin-bottom: 6px;">Or Upload Answer File</label>
+                            <input type="file" name="submission_file" style="width: 100%; padding: 6px 12px; background: white; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.875rem;">
+                            @error('submission_file') <span style="color: #DC2626; font-size: 0.75rem; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; font-size: 0.875rem; font-weight: 600; color: #78350F; margin-bottom: 6px;">Exercise Score (Fraction format, e.g. 9/10)</label>
+                        <div style="display: flex; align-items: center; gap: 8px; max-width: 300px;">
+                            <input type="number" step="any" name="obtained_score" value="{{ old('obtained_score', $obtained) }}" placeholder="Score (e.g. 9)" style="flex: 1; padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.875rem; outline: none; background: white;">
+                            <span style="font-weight: bold; font-size: 1.25rem; color: #78350F;">/</span>
+                            <input type="number" step="any" name="total_score" value="{{ old('total_score', $total) }}" placeholder="Total (e.g. 10)" style="flex: 1; padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.875rem; outline: none; background: white;">
+                        </div>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px;">
+                        @if($moduleContent->is_completed)
+                            <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">✓ Completed</span>
+                        @else
+                            <div></div>
+                        @endif
+
+                        <button type="submit" style="background-color: #D97706; color: white; border: none; padding: 10px 24px; border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 2px 4px rgba(217, 119, 6, 0.2);">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                            </svg>
+                            {{ $moduleContent->is_completed ? 'Update Submission' : 'Submit Answer & Mark as Completed' }}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        @else
+            <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #E5E7EB; display: flex; justify-content: flex-end;">
+                <form action="{{ route('content.toggle-complete', $moduleContent->id) }}" method="POST">
+                    @csrf
+                    @if($moduleContent->is_completed)
+                        <button type="submit" style="background-color: #ECFDF5; color: #059669; border: 1px solid #A7F3D0; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                            </svg>
+                            Completed (Click to unmark)
+                        </button>
+                    @else
+                        <button type="submit" style="background-color: #4F46E5; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                            </svg>
+                            Mark as Completed
+                        </button>
+                    @endif
+                </form>
+            </div>
+        @endif
     </div>
 </div>
 @endsection

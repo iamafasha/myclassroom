@@ -30,3 +30,39 @@ Route::post('/content/{moduleContent}/toggle-complete', function (App\Models\Mod
     return back();
 })->name('content.toggle-complete');
 
+Route::post('/content/{moduleContent}/submit-exercise', function (Illuminate\Http\Request $request, App\Models\ModuleContent $moduleContent) {
+    $request->validate([
+        'submission_link' => 'nullable|url',
+        'submission_file' => 'nullable|file|max:51200',
+        'obtained_score' => 'nullable|numeric',
+        'total_score' => 'nullable|numeric',
+        'score' => 'nullable|string|max:50',
+    ]);
+
+    if (!$request->submission_link && !$request->hasFile('submission_file') && !$request->score && !$request->obtained_score) {
+        return back()->withErrors(['exercise' => 'Please provide an answer link, upload a file, or enter a score before submitting.']);
+    }
+
+    if ($request->submission_link) {
+        $moduleContent->submission_link = $request->submission_link;
+    }
+
+    if ($request->hasFile('submission_file')) {
+        $path = $request->file('submission_file')->store('exercise_submissions', 'public');
+        $moduleContent->submission_file_path = $path;
+    }
+
+    if ($request->filled('obtained_score') && $request->filled('total_score')) {
+        $moduleContent->score = $request->obtained_score . '/' . $request->total_score;
+    } elseif ($request->filled('obtained_score')) {
+        $moduleContent->score = $request->obtained_score;
+    } elseif ($request->has('score')) {
+        $moduleContent->score = $request->score;
+    }
+
+    $moduleContent->is_completed = true;
+    $moduleContent->save();
+
+    return back();
+})->name('content.submit-exercise');
+

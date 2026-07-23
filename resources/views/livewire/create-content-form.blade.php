@@ -30,6 +30,7 @@ new class extends Component
     
     public $linkUrl = '';
     public $linkDescription = '';
+    public $isExercise = false;
     
     public function mount($moduleId)
     {
@@ -156,6 +157,7 @@ new class extends Component
         $moduleContent->label = $this->label;
         $moduleContent->slug = \Illuminate\Support\Str::slug($this->label . '-' . time());
         $moduleContent->sort_order = $maxOrder + 1;
+        $moduleContent->is_exercise = $this->isExercise;
         $moduleContent->save();
 
         return redirect('/');
@@ -280,6 +282,14 @@ new class extends Component
             @error('linkDescription') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
         </div>
     @endif
+
+    <div class="mb-6 pt-4 border-t border-gray-200">
+        <label class="flex items-center cursor-pointer">
+            <input type="checkbox" wire:model="isExercise" class="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" style="width: 18px; height: 18px; cursor: pointer;">
+            <span class="ml-2 text-sm font-semibold text-gray-800">Mark this content as an Exercise</span>
+        </label>
+        <p class="text-xs text-gray-500 mt-1 ml-6">Exercises require students to upload a file or submit an answer link before completing.</p>
+    </div>
 
     <div class="flex justify-end space-x-3 gap-3">
         <a href="/" class="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 text-decoration-none inline-block">Cancel</a>

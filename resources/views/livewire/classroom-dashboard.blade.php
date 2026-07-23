@@ -203,6 +203,20 @@ new class extends Component
         }
     }
 
+    public function moveContentToModule($contentId, $targetModuleId)
+    {
+        $moduleContent = \App\Models\ModuleContent::find($contentId);
+        $targetModule = Module::find($targetModuleId);
+
+        if ($moduleContent && $targetModule && $moduleContent->module_id != $targetModuleId) {
+            $maxOrder = \App\Models\ModuleContent::where('module_id', $targetModuleId)->max('sort_order') ?? 0;
+            
+            $moduleContent->module_id = $targetModuleId;
+            $moduleContent->sort_order = $maxOrder + 1;
+            $moduleContent->save();
+        }
+    }
+
     #[Computed]
     public function courses()
     {
@@ -284,7 +298,15 @@ new class extends Component
 
         <div class="module-list" style="padding-bottom: 50px;">
             @foreach($this->modules as $module)
-                <div wire:click="selectModule({{ $module->id }})" class="module-card design group {{ $selectedModuleId == $module->id ? 'active' : '' }}" style="position: relative; cursor: pointer; user-select: none;">
+                <div wire:click="selectModule({{ $module->id }})" 
+                     x-data="{ isOver: false }"
+                     @dragover.prevent="isOver = true"
+                     @dragenter.prevent="isOver = true"
+                     @dragleave.prevent="isOver = false"
+                     @drop.prevent="isOver = false; const cId = event.dataTransfer.getData('contentId'); if(cId) { $wire.moveContentToModule(cId, {{ $module->id }}); }"
+                     :style="isOver ? 'border: 2px dashed #4F46E5; background-color: #EEF2FF;' : ''"
+                     class="module-card design group {{ $selectedModuleId == $module->id ? 'active' : '' }}" 
+                     style="position: relative; cursor: pointer; user-select: none; transition: all 0.2s;">
                     <div class="module-header">
                         <div class="module-date">{{ $module->created_at->format('d F') }}</div>
                     </div>
@@ -353,16 +375,38 @@ new class extends Component
     
         <div class="contents-list">
             @foreach($this->contents as $moduleContent)
-                <div class="content-card group {{ $moduleContent->is_completed ? 'completed' : '' }}" style="width:100%">
-                    <div class="content-info">
+                <div draggable="true"
+                     @dragstart="event.dataTransfer.setData('contentId', '{{ $moduleContent->id }}'); event.dataTransfer.effectAllowed = 'move';"
+                     class="content-card group {{ $moduleContent->is_completed ? 'completed' : '' }}" 
+                     style="width:100%; cursor: grab; display: flex; align-items: center; gap: 10px;">
+                    
+                    <div style="cursor: grab; color: #9CA3AF; display: flex; align-items: center; padding-right: 4px;" title="Drag to move to another module">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16" />
+                        </svg>
+                    </div>
+
+                    <div class="content-info" style="flex: 1;">
                         <div class="content-name" style="{{ $moduleContent->is_completed ? 'text-decoration: line-through; color: #6B7280;' : '' }}">
                             {{ $moduleContent->label ?? 'Unnamed Content' }}
                         </div>
-                        <div class="content-details" style="margin-top: 4px;">
+                        <div class="content-details" style="margin-top: 4px; display: flex; align-items: center; gap: 6px;">
                             @if($moduleContent->content && $moduleContent->content->contentable)
                                 <span class="badge badge-medium">{{ str_replace('Content', '', class_basename($moduleContent->content->contentable_type)) }}</span>
                             @else
                                 <span class="badge badge-medium">Unknown</span>
+                            @endif
+
+                            @if($moduleContent->is_exercise)
+                                <span style="font-size: 0.75rem; color: #D97706; background: #FEF3C7; border: 1px solid #FCD34D; padding: 2px 8px; border-radius: 9999px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
+                                    📝 Exercise
+                                </span>
+                            @endif
+
+                            @if($moduleContent->score)
+                                <span style="font-size: 0.75rem; color: #92400E; background: #FDE68A; border: 1px solid #F59E0B; padding: 2px 8px; border-radius: 9999px; font-weight: 700; display: inline-flex; align-items: center;">
+                                    Score: {{ $moduleContent->score }}
+                                </span>
                             @endif
                             
                             @if($moduleContent->is_completed)
