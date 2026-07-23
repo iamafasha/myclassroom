@@ -7,6 +7,7 @@ use App\Models\ModuleContent;
 use App\Models\NoteContent;
 use App\Models\PdfNotesContent;
 use App\Models\VideoContent;
+use App\Models\LinkContent;
 use App\Models\File;
 
 new class extends Component
@@ -26,6 +27,9 @@ new class extends Component
     public $videoExternalUrl = '';
     public $videoStartTime = '';
     public $videoEndTime = '';
+    
+    public $linkUrl = '';
+    public $linkDescription = '';
     
     public function mount($moduleId)
     {
@@ -126,6 +130,17 @@ new class extends Component
             $contentable->start_time = $startTime;
             $contentable->end_time = $endTime;
             $contentable->save();
+        } elseif ($this->type === 'link') {
+            $this->validate([
+                'linkUrl' => 'required|url',
+                'linkDescription' => 'nullable|string',
+            ]);
+
+            $contentable = new LinkContent();
+            $contentable->name = $this->label;
+            $contentable->url = $this->linkUrl;
+            $contentable->description = $this->linkDescription;
+            $contentable->save();
         }
 
         $content = new Content();
@@ -164,6 +179,7 @@ new class extends Component
             <option value="note">Text Note</option>
             <option value="pdf">PDF Document</option>
             <option value="video">Video Content</option>
+            <option value="link">External Link</option>
         </select>
     </div>
     
@@ -250,6 +266,18 @@ new class extends Component
                 <input type="text" wire:model="videoEndTime" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="00:00">
                 @error('videoEndTime') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
             </div>
+        </div>
+    @elseif($type === 'link')
+        <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Target Link URL</label>
+            <input type="url" wire:model="linkUrl" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="https://example.com/resource">
+            @error('linkUrl') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+        </div>
+
+        <div class="mb-6">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Description (Optional)</label>
+            <textarea wire:model="linkDescription" rows="4" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="Brief description of what the student will find at this link..."></textarea>
+            @error('linkDescription') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
         </div>
     @endif
 

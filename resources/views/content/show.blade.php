@@ -307,6 +307,25 @@
                     });
                 </script>
             @endif
+        @elseif($type === 'LinkContent')
+            <div style="padding: 30px; background: #F9FAFB; border-radius: 8px; border: 1px solid #E5E7EB; text-align: center;">
+                <div style="margin-bottom: 20px;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="#4F46E5" style="margin: 0 auto 12px; display: block;">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                    </svg>
+                    <h3 style="font-size: 1.25rem; font-weight: 600; color: #111827; margin-bottom: 8px;">External Resource Link</h3>
+                    @if($contentable->description)
+                        <p style="color: #4B5563; font-size: 0.95rem; max-width: 600px; margin: 0 auto 20px; line-height: 1.5;">{{ $contentable->description }}</p>
+                    @endif
+                </div>
+
+                <a href="{{ $contentable->url }}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 8px; background-color: #4F46E5; color: white; padding: 12px 24px; border-radius: 8px; font-weight: 600; text-decoration: none; box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2); transition: background-color 0.2s;">
+                    Visit Resource
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                </a>
+            </div>
         @else
             <div style="color: #6B7280; text-align: center; padding: 40px;">
                 Content not available.
