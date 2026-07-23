@@ -16,27 +16,25 @@ new class extends Component
     public $showCreateModuleModal = false;
     public $newModuleTitle = '';
 
-    public function mount()
+    public function mount($courseId = null, $moduleId = null)
     {
-
-        
-    }
-
-    public function updatedSelectedCourseId($value)
-    {
-        $course = Course::find($value);
-
-        if ($course) {
-            $firstModule = $course->modules()->first();
-            $this->selectedModuleId = $firstModule ? $firstModule->id : null;
-        } else {
-            $this->selectedModuleId = null;
-        }
-    }
-
-    public function selectModule($moduleId)
-    {
+        $this->selectedCourseId = $courseId;
         $this->selectedModuleId = $moduleId;
+        
+        if (!$this->selectedCourseId) {
+            $firstCourse = Course::first();
+            if ($firstCourse) {
+                $this->selectedCourseId = $firstCourse->id;
+                
+                // If a course was automatically selected, try to select its first module
+                if (!$this->selectedModuleId) {
+                    $firstModule = Module::where('course_id', $this->selectedCourseId)->first();
+                    if ($firstModule) {
+                        $this->selectedModuleId = $firstModule->id;
+                    }
+                }
+            }
+        }
     }
 
     public function createCourse()
@@ -50,11 +48,7 @@ new class extends Component
             'slug' => \Illuminate\Support\Str::slug($this->newCourseTitle . '-' . time()),
         ]);
 
-        $this->selectedCourseId = $course->id;
-        $this->selectedModuleId = null;
-        
-        $this->showCreateCourseModal = false;
-        $this->newCourseTitle = '';
+        return redirect()->route('course.show', $course->id);
     }
 
     public function createModule()
@@ -73,9 +67,49 @@ new class extends Component
             'slug' => \Illuminate\Support\Str::slug($this->newModuleTitle . '-' . time()),
         ]);
 
-        $this->selectedModuleId = $module->id;
-        $this->showCreateModuleModal = false;
-        $this->newModuleTitle = '';
+        return redirect()->route('course.module.show', ['course' => $this->selectedCourseId, 'module' => $module->id]);
+    }
+
+    public function deleteContent($contentId)
+    {
+        $moduleContent = \App\Models\ModuleContent::find($contentId);
+        if ($moduleContent) {
+            $content = $moduleContent->content;
+            if ($content) {
+                $contentable = $content->contentable;
+                if ($contentable) {
+                    $contentable->delete();
+                }
+                $content->delete();
+            }
+            $moduleContent->delete();
+        }
+    }
+
+    public function deleteModule($moduleId)
+    {
+        $module = Module::find($moduleId);
+        if ($module) {
+            foreach ($module->moduleContents as $mc) {
+                $this->deleteContent($mc->id);
+            }
+            $module->delete();
+        }
+        
+        return redirect()->route('course.show', $this->selectedCourseId);
+    }
+
+    public function deleteCourse($courseId)
+    {
+        $course = Course::find($courseId);
+        if ($course) {
+            foreach ($course->modules as $mod) {
+                $this->deleteModule($mod->id);
+            }
+            $course->delete();
+        }
+        
+        return redirect()->route('home');
     }
 
     #[Computed]
@@ -125,22 +159,30 @@ new class extends Component
         </div>
 
 
-        <div class="course-selector" x-data="{ open: false }" @click.outside="open = false" style="position: relative;">
+        <div class="course-selector group" x-data="{ open: false }" @click.outside="open = false" style="position: relative; display: flex; align-items: center; gap: 8px;">
             
-            <div @click="open = !open" class="select-styled" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; background-image: none; user-select: none;">
+            <div @click="open = !open" class="select-styled" style="flex: 1; cursor: pointer; display: flex; justify-content: space-between; align-items: center; background-image: none; user-select: none;">
                 <span>{{ $this->currentCourse ? $this->currentCourse->title : 'Select a course' }}</span>
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#6B7280" :style="open ? 'transform: rotate(180deg); transition: transform 0.2s;' : 'transition: transform 0.2s;'">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
                 </svg>
             </div>
+            
+            @if($this->currentCourse)
+                <button wire:click.stop="deleteCourse({{ $this->currentCourse->id }})" wire:confirm="Are you sure you want to delete this course and all its modules/contents?" class="opacity-0 group-hover:opacity-100 transition-opacity" style="background: none; border: none; cursor: pointer; color: #EF4444; padding: 4px;" title="Delete Course">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                </button>
+            @endif
 
 
             <div class="custom-select-dropdown" x-show="open" x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100" x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95" style="display: none;">
                 @foreach($this->courses as $course)
-                    <div wire:click="$set('selectedCourseId', {{ $course->id }}); open = false" 
+                    <a href="{{ route('course.show', $course->id) }}" wire:navigate style="display: block; text-decoration: none;"
                          class="custom-select-option {{ $selectedCourseId == $course->id ? 'selected' : '' }}">
                         {{ $course->title }}
-                    </div>
+                    </a>
                 @endforeach
                 @if($this->courses->isEmpty())
                     <div class="custom-select-option" style="cursor: default; color: #6B7280;">No courses available</div>
@@ -151,14 +193,19 @@ new class extends Component
 
         <div class="module-list" style="padding-bottom: 50px;">
             @foreach($this->modules as $module)
-                <div class="module-card design {{ $selectedModuleId == $module->id ? 'active' : '' }}" wire:click="selectModule({{ $module->id }})" style="cursor: pointer;">
+                <a href="{{ route('course.module.show', ['course' => $selectedCourseId, 'module' => $module->id]) }}" wire:navigate class="module-card design group {{ $selectedModuleId == $module->id ? 'active' : '' }}" style="position: relative; text-decoration: none; color: inherit; display: block;">
                     <div class="module-header">
                         <div class="module-date">{{ $module->created_at->format('d F') }}</div>
                     </div>
-                    <div class="module-body">
+                    <div class="module-body" style="display: flex; justify-content: space-between; align-items: center;">
                         <div class="module-title">{{ $module->title }}</div>
+                        <button wire:click.prevent="deleteModule({{ $module->id }})" wire:confirm="Are you sure you want to delete this module and its contents?" class="opacity-0 group-hover:opacity-100 transition-opacity" style="background: none; border: none; cursor: pointer; color: #EF4444; padding: 4px;" title="Delete Module">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                        </button>
                     </div>
-                </div>
+                </a>
             @endforeach
 
 
@@ -202,7 +249,7 @@ new class extends Component
     
         <div class="contents-list">
             @foreach($this->contents as $moduleContent)
-                <div class="content-card" style="width:100%">
+                <div class="content-card group" style="width:100%">
                     <div class="content-info">
                         <div class="content-name">{{ $moduleContent->label ?? 'Unnamed Content' }}</div>
                         <div class="content-details">
@@ -213,7 +260,12 @@ new class extends Component
                             @endif
                         </div>
                     </div>
-                    <div class="action-area">
+                    <div class="action-area" style="display: flex; gap: 10px; align-items: center;">
+                            <button wire:click.stop="deleteContent({{ $moduleContent->id }})" wire:confirm="Are you sure you want to delete this content?" class="opacity-0 group-hover:opacity-100 transition-opacity" style="background: #FEE2E2; color: #EF4444; border: none; padding: 8px; border-radius: 0.375rem; cursor: pointer; display: flex; align-items: center; justify-content: center;" title="Delete Content">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                            </button>
                             <a href="{{ route('content.show', $moduleContent->id) }}" class="btn-solve" style="text-decoration: none;">
                                View
                             </a>
