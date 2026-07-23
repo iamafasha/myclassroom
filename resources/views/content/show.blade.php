@@ -18,39 +18,74 @@
                 {!! nl2br(e($contentable->content)) !!}
             </div>
         @elseif($type === 'PdfNotesContent')
-            <div style="margin-bottom: 20px; padding: 15px; background-color: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 8px; color: #1E3A8A; font-weight: 500;">
-                @if($contentable->start_position && $contentable->end_position)
-                    Please read from page {{ $contentable->start_position }} to {{ $contentable->end_position }}.
-                @elseif($contentable->start_position)
-                    Please start reading from page {{ $contentable->start_position }}.
-                @else
-                    Please read the attached PDF document.
-                @endif
-            </div>
             
             @php
                 $pdfUrl = $contentable->file_url;
-                if ($contentable->start_position) {
-                    $pdfUrl .= '#page=' . $contentable->start_position;
-                }
+                $startPage = $contentable->start_position ? (int)$contentable->start_position : 1;
+                $endPage = $contentable->end_position ? (int)$contentable->end_position : 'null';
             @endphp
             
-            <iframe src="{{ $pdfUrl }}" width="100%" height="800px" style="border: 1px solid #E5E7EB; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);"></iframe>
-        @elseif($type === 'VideoContent')
-            <div style="margin-bottom: 20px; padding: 15px; background-color: #F3F4F6; border: 1px solid #E5E7EB; border-radius: 8px; color: #374151; font-weight: 500;">
-                @if($contentable->start_time && $contentable->end_time)
-                    Please watch from {{ $contentable->start_time }} to {{ $contentable->end_time }}.
-                @elseif($contentable->start_time)
-                    Please start watching at {{ $contentable->start_time }}.
-                @else
-                    Please watch the attached video.
-                @endif
+            <div id="pdf-container" style="display: flex; flex-direction: column; gap: 20px; align-items: center; background: #F3F4F6; padding: 20px; border-radius: 8px; border: 1px solid #E5E7EB;">
+                <p id="pdf-loading" style="color: #6B7280; font-weight: 500;">Loading PDF pages...</p>
             </div>
+            
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+            <script>
+                pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                
+                const url = "{{ $pdfUrl }}";
+                const startPage = {{ $startPage }};
+                let endPage = {{ $endPage }};
+                const container = document.getElementById('pdf-container');
+                const loading = document.getElementById('pdf-loading');
+                
+                pdfjsLib.getDocument(url).promise.then(function(pdf) {
+                    loading.style.display = 'none';
+                    if (endPage === null || endPage > pdf.numPages) {
+                        endPage = pdf.numPages;
+                    }
+                    
+                    for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
+                        pdf.getPage(pageNum).then(function(page) {
+                            const viewport = page.getViewport({scale: 1.5});
+                            const canvas = document.createElement('canvas');
+                            const ctx = canvas.getContext('2d');
+                            canvas.height = viewport.height;
+                            canvas.width = viewport.width;
+                            canvas.style.maxWidth = '100%';
+                            canvas.style.boxShadow = '0 4px 6px -1px rgba(0,0,0,0.1)';
+                            
+                            const renderContext = {
+                                canvasContext: ctx,
+                                viewport: viewport
+                            };
+                            page.render(renderContext);
+                            
+                            // Insert in correct order
+                            canvas.dataset.page = pageNum;
+                            let inserted = false;
+                            for (let i = 0; i < container.children.length; i++) {
+                                if (parseInt(container.children[i].dataset.page) > pageNum) {
+                                    container.insertBefore(canvas, container.children[i]);
+                                    inserted = true;
+                                    break;
+                                }
+                            }
+                            if (!inserted) {
+                                container.appendChild(canvas);
+                            }
+                        });
+                    }
+                }).catch(function(err) {
+                    loading.innerText = 'Failed to load PDF.';
+                    console.error(err);
+                });
+            </script>
+        @elseif($type === 'VideoContent')
             
             @php
                 $videoUrl = $contentable->file_url;
                 
-                // Helper to convert MM:SS to seconds
                 function timeToSeconds($time) {
                     if (!$time) return null;
                     $parts = explode(':', $time);
@@ -60,28 +95,105 @@
                     if (count($parts) == 3) {
                         return ($parts[0] * 3600) + ($parts[1] * 60) + $parts[2];
                     }
-                    return $time;
+                    return null;
                 }
                 
-                $tParam = '';
                 $startSeconds = timeToSeconds($contentable->start_time);
                 $endSeconds = timeToSeconds($contentable->end_time);
-                
-                if ($startSeconds !== null && $endSeconds !== null) {
-                    $tParam = '#t=' . $startSeconds . ',' . $endSeconds;
-                } elseif ($startSeconds !== null) {
-                    $tParam = '#t=' . $startSeconds;
-                }
-                
-                $videoUrl .= $tParam;
             @endphp
             
-            <div style="border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); border: 1px solid #E5E7EB;">
-                <video controls width="100%" style="display: block;">
+            <div style="border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); border: 1px solid #E5E7EB; background: #000; position: relative;" id="video-container">
+                <video id="course-video" width="100%" style="display: block;">
                     <source src="{{ $videoUrl }}" type="video/mp4">
                     Your browser does not support the video tag.
                 </video>
+                
+                <!-- Custom Controls -->
+                <div id="video-controls" style="position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); padding: 10px 15px; display: flex; align-items: center; gap: 15px;">
+                    <button id="play-pause" style="background: none; border: none; color: white; cursor: pointer; padding: 0; display: flex; align-items: center;">
+                        <!-- Play Icon -->
+                        <svg id="icon-play" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                        <!-- Pause Icon (hidden) -->
+                        <svg id="icon-pause" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 24 24" style="display:none;"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                    </button>
+                    <input type="range" id="seek-bar" value="0" min="0" max="100" style="flex: 1; cursor: pointer;">
+                    <span id="time-display" style="color: white; font-size: 13px; font-family: monospace;">00:00 / 00:00</span>
+                </div>
             </div>
+            
+            <script>
+                document.addEventListener("DOMContentLoaded", function() {
+                    const video = document.getElementById('course-video');
+                    const playPauseBtn = document.getElementById('play-pause');
+                    const iconPlay = document.getElementById('icon-play');
+                    const iconPause = document.getElementById('icon-pause');
+                    const seekBar = document.getElementById('seek-bar');
+                    const timeDisplay = document.getElementById('time-display');
+                    
+                    let startSec = {{ $startSeconds ?? 'null' }};
+                    let endSec = {{ $endSeconds ?? 'null' }};
+                    
+                    function formatTime(seconds) {
+                        if (isNaN(seconds)) return "00:00";
+                        const m = Math.floor(seconds / 60);
+                        const s = Math.floor(seconds % 60);
+                        return (m < 10 ? "0" + m : m) + ":" + (s < 10 ? "0" + s : s);
+                    }
+                    
+                    video.addEventListener('loadedmetadata', function() {
+                        if (startSec === null) startSec = 0;
+                        if (endSec === null || endSec > video.duration) endSec = video.duration;
+                        
+                        video.currentTime = startSec;
+                        updateDisplay();
+                    });
+                    
+                    function updateDisplay() {
+                        if (startSec === null) return;
+                        const currentRel = Math.max(0, video.currentTime - startSec);
+                        const durationRel = Math.max(0, endSec - startSec);
+                        
+                        seekBar.max = durationRel;
+                        seekBar.value = currentRel;
+                        timeDisplay.textContent = formatTime(currentRel) + " / " + formatTime(durationRel);
+                    }
+                    
+                    playPauseBtn.addEventListener('click', function() {
+                        if (video.paused) {
+                            if (video.currentTime >= endSec) video.currentTime = startSec;
+                            video.play();
+                            iconPlay.style.display = 'none';
+                            iconPause.style.display = 'block';
+                        } else {
+                            video.pause();
+                            iconPlay.style.display = 'block';
+                            iconPause.style.display = 'none';
+                        }
+                    });
+                    
+                    video.addEventListener('timeupdate', function() {
+                        if (startSec !== null && video.currentTime < startSec) {
+                            video.currentTime = startSec;
+                        }
+                        if (endSec !== null && video.currentTime >= endSec) {
+                            video.pause();
+                            video.currentTime = endSec;
+                            iconPlay.style.display = 'block';
+                            iconPause.style.display = 'none';
+                        }
+                        updateDisplay();
+                    });
+                    
+                    seekBar.addEventListener('input', function() {
+                        video.currentTime = startSec + parseFloat(seekBar.value);
+                    });
+                    
+                    video.addEventListener('ended', function() {
+                        iconPlay.style.display = 'block';
+                        iconPause.style.display = 'none';
+                    });
+                });
+            </script>
         @else
             <div style="color: #6B7280; text-align: center; padding: 40px;">
                 Content not available.
