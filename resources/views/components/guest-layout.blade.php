@@ -18,7 +18,7 @@
                         <svg class="w-8 h-8 text-blue-600" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
                         </svg>
-                        <span class="text-2xl font-bold text-gray-800">AccioJob</span>
+                        <span class="text-2xl font-bold text-gray-800">Classroom</span>
                     </div>
                 </div>
 
@@ -34,7 +34,7 @@
             <div class="relative z-10 p-16 flex flex-col h-full justify-between">
                 <div>
                     <h2 class="text-4xl font-bold mb-4 leading-tight">Over 500+ Partner Companies Hire Our Students</h2>
-                    <p class="text-lg text-gray-200">AccioJob is the most trusted training & placement platform.</p>
+                    <p class="text-lg text-gray-200">Classroom is the most trusted training & placement platform.</p>
                 </div>
             </div>
         </div>

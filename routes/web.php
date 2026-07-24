@@ -4,6 +4,10 @@ use Illuminate\Support\Facades\Route;
 
 
 Route::middleware('auth')->group(function () {
+    \Livewire\Volt\Volt::route('/classes', 'classes.index')->name('classes.index');
+    \Livewire\Volt\Volt::route('/classes/{classroom}', 'classes.show')->name('classes.show');
+    \Livewire\Volt\Volt::route('/classes/{classroom}/courses/add', 'classes.courses-add')->name('classes.courses.add');
+    \Livewire\Volt\Volt::route('/courses', 'courses.index')->name('courses.index');
 
 
     Route::get('/', function () {

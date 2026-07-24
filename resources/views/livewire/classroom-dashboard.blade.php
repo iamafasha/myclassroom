@@ -1,6 +1,6 @@
 <?php
 
-use Livewire\Component;
+use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
 use App\Models\Course;
 use App\Models\Module;
@@ -259,9 +259,6 @@ new class extends Component
 <div class="main-layout">
     <div class="panel-list p-2">
 
-        <div class="w-full p-1" style="display: flex; justify-content: flex-end;">
-            <button wire:click="$set('showCreateCourseModal', true)" class="bg-blue-500 text-white p-2 rounded cursor-pointer" >+ Add Course</button>
-        </div>
 
 
         <div class="course-selector group" x-data="{ open: false }" @click.outside="open = false" style="position: relative; display: flex; align-items: center; gap: 8px;">
@@ -273,14 +270,7 @@ new class extends Component
                 </svg>
             </div>
             
-            @if($this->currentCourse)
-                <button wire:click.stop="deleteCourse({{ $this->currentCourse->id }})" wire:confirm="Are you sure you want to delete this course and all its modules/contents?" class="opacity-0 group-hover:opacity-100 transition-opacity" style="background: none; border: none; cursor: pointer; color: #EF4444; padding: 4px;" title="Delete Course">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                </button>
-            @endif
-
+          
 
             <div class="custom-select-dropdown" x-show="open" x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100" x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95" style="display: none;">
                 @foreach($this->courses as $course)
