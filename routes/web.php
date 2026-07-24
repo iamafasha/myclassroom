@@ -1,12 +1,20 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Livewire\Volt\Volt;
 
 Route::get('/', function () {
     return view('classroom');
 })->name('home');
 
-Route::get('/course/{course}', function (\App\Models\Course $course) {
+
+Route::middleware('guest')->group(function () {
+    Volt::route('login', 'auth.login')->name('login');
+    Volt::route('register', 'auth.register')->name('register');
+});
+
+Route::middleware('auth')->group(function () {
+    Route::get('/course/{course}', function (\App\Models\Course $course) {
     return view('classroom', ['courseId' => $course->id]);
 })->name('course.show');
 
@@ -93,4 +101,5 @@ Route::post('/content/{moduleContent}/submit-quiz', function (Illuminate\Http\Re
     
     return back();
 })->name('content.submit-quiz');
+});
 
