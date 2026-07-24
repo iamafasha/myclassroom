@@ -3,34 +3,391 @@
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta name="csrf-token" content="{{ csrf_token() }}">
+        <title>Classroom Dashboard</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+        @livewireStyles
+        <style>
+            :root {
+                --sidebar-width: 60px;
+                --panel-list-width: 420px;
+                --bg-main: #ffffff;
+                --text-primary: #111827;
+                --text-secondary: #6B7280;
+                --primary-blue: #2563EB;
+                --border-color: #E5E7EB;
+            }
 
-        <title>{{ config('app.name', 'Laravel') }}</title>
+            * { box-sizing: border-box; }
 
-        <!-- Fonts -->
-        <link rel="preconnect" href="https://fonts.bunny.net">
-        <link href="https://fonts.bunny.net/css?family=figtree:400,500,600&display=swap" rel="stylesheet" />
+            body {
+                margin: 0;
+                font-family: 'Inter', system-ui, -apple-system, sans-serif;
+                background-color: var(--bg-main);
+                color: var(--text-primary);
+                display: flex;
+                height: 100vh;
+                overflow: hidden;
+            }
 
-        <!-- Scripts -->
+            .sidebar {
+                width: var(--sidebar-width);
+                background-color: #ffffff;
+                border-right: 1px solid var(--border-color);
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                padding: 15px 0;
+                flex-shrink: 0;
+            }
+
+            .sidebar-logo {
+                margin-bottom: 30px;
+                padding: 10px;
+            }
+
+            .sidebar-item {
+                width: 100%;
+                display: flex;
+                justify-content: center;
+                padding: 12px 0;
+                color: #6B7280;
+                cursor: pointer;
+                border-left: 3px solid transparent;
+            }
+
+            .sidebar-item.active {
+                color: #2563EB;
+                background-color: #EFF6FF;
+                border-left-color: #2563EB;
+            }
+
+            .sidebar-item:hover:not(.active) {
+                background-color: #F9FAFB;
+            }
+
+            .main-layout {
+                display: flex;
+                flex: 1;
+                overflow: hidden;
+            }
+
+            .panel-list {
+                width: var(--panel-list-width);
+                background-color: #F9FAFB;
+                border-right: 1px solid var(--border-color);
+                display: flex;
+                flex-direction: column;
+                height: 100%;
+                overflow-y: auto;
+            }
+
+            .course-selector {
+                margin-bottom: 20px;
+            }
+
+            .select-styled {
+                width: 100%;
+                padding: 10px 15px;
+                border-radius: 8px;
+                border: 1px solid #D1D5DB;
+                background: #F3F4F6;
+                font-size: 13px;
+                font-weight: 500;
+                appearance: none;
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236B7280'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+                background-repeat: no-repeat;
+                background-position: right 10px center;
+                background-size: 16px;
+            }
+
+            .custom-select-dropdown {
+                position: absolute;
+                top: 100%;
+                left: 0;
+                right: 0;
+                z-index: 50;
+                background: #ffffff;
+                border: 1px solid #D1D5DB;
+                border-radius: 8px;
+                margin-top: 4px;
+                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+                max-height: 250px;
+                overflow-y: auto;
+            }
+
+            .custom-select-option {
+                padding: 10px 15px;
+                cursor: pointer;
+                font-size: 13px;
+                font-weight: 500;
+                color: var(--text-primary);
+                transition: background-color 0.2s, color 0.2s;
+            }
+
+            .custom-select-option:not(:last-child) {
+                border-bottom: 1px solid #F3F4F6;
+            }
+
+            .custom-select-option:hover {
+                background-color: #EFF6FF;
+                color: #2563EB;
+            }
+
+            .custom-select-option.selected {
+                background-color: #EFF6FF;
+                color: #2563EB;
+                font-weight: 600;
+            }
+
+            .progress-container {
+                margin-bottom: 25px;
+            }
+
+            .progress-card {
+                background: #ffffff;
+                border: 1px solid #FEE2E2;
+                border-radius: 12px;
+                padding: 20px;
+                box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            }
+
+            .progress-bar-wrapper {
+                position: relative;
+                height: 8px;
+                background-color: #FEE2E2;
+                border-radius: 4px;
+                margin: 25px 0 15px;
+            }
+
+            .progress-bar-fill {
+                height: 100%;
+                background-color: #EF4444;
+                border-radius: 4px;
+                width: 21%;
+            }
+
+            .progress-tooltip {
+                position: absolute;
+                top: -30px;
+                left: 21%;
+                transform: translateX(-50%);
+                background-color: #EF4444;
+                color: white;
+                padding: 2px 8px;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: 700;
+            }
+
+            .progress-tooltip::after {
+                content: '';
+                position: absolute;
+                bottom: -4px;
+                left: 50%;
+                transform: translateX(-50%);
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 4px solid #EF4444;
+            }
+
+            .total-info {
+                text-align: center;
+                font-size: 12px;
+                color: #4B5563;
+                background: #F9FAFB;
+                padding: 4px 10px;
+                border-radius: 20px;
+                width: fit-content;
+                margin: 0 auto;
+                border: 1px solid #E5E7EB;
+            }
+
+            .module-list {
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+            }
+
+            .module-card {
+                border-radius: 8px;
+                padding: 16px;
+                border: 1px solid transparent;
+                cursor: pointer;
+                display: flex;
+                flex-direction: column;
+                transition: transform 0.1s;
+            }
+
+            .module-card:active { transform: scale(0.99); }
+
+            .module-card.js { background-color: #FEF2F2; border-color: #FEE2E2; }
+            .module-card.design { background-color: #F0FDF4; border-color: #DCFCE7; }
+            .module-card.active { background-color: #ffffff; border-color: #2563EB; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.1); }
+
+            .module-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                margin-bottom: 4px;
+            }
+
+            .module-date { font-size: 10px; color: #9CA3AF; text-transform: uppercase; letter-spacing: 0.5px; }
+            .module-meta-right { font-size: 10px; text-align: right; }
+            .meta-item { margin-bottom: 2px; }
+            .meta-contents { color: #EF4444; }
+            .meta-videos { color: #10B981; }
+
+            .module-body {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-end;
+            }
+
+            .module-title { font-weight: 600; font-size: 13.5px; color: #111827; max-width: 75%; }
+            .active .module-title { color: #2563EB; }
+
+            .content-header { margin-bottom: 20px; }
+            .content-breadcrumb { font-size: 11px; font-weight: 700; color: #6B7280; text-transform: uppercase; margin-bottom: 8px; }
+            .content-title { font-size: 24px; font-weight: 800; color: #111827; margin: 0; }
+
+            .tabs-container {
+                display: flex;
+                gap: 30px;
+                border-bottom: 1px solid #F3F4F6;
+                margin-bottom: 30px;
+                margin-top: 20px;
+            }
+
+            .tab-item {
+                padding: 10px 0;
+                font-size: 12px;
+                font-weight: 700;
+                color: #6B7280;
+                cursor: pointer;
+                text-transform: uppercase;
+                border-bottom: 2px solid transparent;
+                transition: all 0.2s;
+            }
+
+            .tab-item.active {
+                color: #2563EB;
+                border-bottom-color: #2563EB;
+            }
+
+            .contents-list {
+                display: flex;
+                flex-direction: column;
+                gap: 15px;
+            }
+
+            .content-card {
+                background: #ffffff;
+                border: 1px solid #E5E7EB;
+                border-radius: 12px;
+                padding: 20px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                transition: box-shadow 0.2s;
+            }
+
+            .content-card:hover {
+                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            }
+
+            .content-info {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .content-name {
+                font-size: 15px;
+                font-weight: 700;
+                color: #1F2937;
+            }
+
+            .content-details {
+                display: flex;
+                gap: 20px;
+                align-items: center;
+                font-size: 12px;
+                color: #6B7280;
+            }
+
+            .badge {
+                padding: 2px 8px;
+                border-radius: 4px;
+                font-weight: 700;
+                font-size: 10px;
+                text-transform: uppercase;
+            }
+
+            .badge-medium { background-color: #FFFBEB; color: #D97706; border: 1px solid #FEF3C7; }
+
+            .content-score-item { display: flex; align-items: center; gap: 5px; }
+
+            .action-area {
+                display: flex;
+                align-items: center;
+            }
+
+            .btn-solve {
+                background-color: #312E81;
+                color: white;
+                padding: 10px 20px;
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: 600;
+                border: none;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .btn-solved {
+                background-color: #F0FDF4;
+                color: #16A34A;
+                padding: 10px 40px;
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: 600;
+                border: 1px solid #DCFCE7;
+            }
+            
+            .star-icon { color: #F59E0B; margin-left: 5px; }
+        </style>
+
         @vite(['resources/css/app.css', 'resources/js/app.js'])
+        
+
     </head>
-    <body class="font-sans antialiased">
-        <div class="min-h-screen bg-gray-100">
-            <livewire:layout.navigation />
-
-            <!-- Page Heading -->
-            @if (isset($header))
-                <header class="bg-white shadow">
-                    <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-                        {{ $header }}
-                    </div>
-                </header>
-            @endif
-
-            <!-- Page Content -->
-            <main>
-                {{ $slot }}
-            </main>
+    <body>
+        <div class="sidebar">
+            <div class="sidebar-logo">
+                <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="32" height="32" rx="8" fill="#2563EB"/>
+                    <path d="M16 8L8 14V24H12V18H20V24H24V14L16 8Z" fill="white"/>
+                </svg>
+            </div>
+            <a href="{{ route('home') }}" class="sidebar-item {{ request()->routeIs('home') ? 'active' : '' }}">
+                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.232.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
+            </a>
+            <a href="{{ route('files.index') }}" class="sidebar-item {{ request()->routeIs('files.*') ? 'active' : '' }}" title="Files">
+                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                </svg>
+            </a>
         </div>
+
+
+        <div class="main-layout">
+            @yield('content')
+        </div>
+
+        @livewireScripts
     </body>
 </html>
