@@ -326,6 +326,78 @@
                     </svg>
                 </a>
             </div>
+        @elseif($type === 'QuizContent')
+            <div style="padding: 24px; background: #F9FAFB; border-radius: 12px; border: 1px solid #E5E7EB;">
+                @if($contentable->description)
+                    <div style="margin-bottom: 24px; color: #4B5563; font-size: 0.95rem; line-height: 1.5; background: #EEF2FF; border: 1px solid #C7D2FE; padding: 14px 18px; border-radius: 8px;">
+                        💡 {{ $contentable->description }}
+                    </div>
+                @endif
+
+                @if($moduleContent->score)
+                    <div style="margin-bottom: 24px; padding: 16px 20px; background: #ECFDF5; border: 1px solid #A7F3D0; border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <h4 style="margin: 0; color: #065F46; font-size: 1rem; font-weight: 700;">Quiz Completed!</h4>
+                            <p style="margin: 4px 0 0 0; color: #047857; font-size: 0.875rem;">Your score has been calculated and saved.</p>
+                        </div>
+                        <div style="font-size: 1.25rem; font-weight: 800; color: #059669; background: white; padding: 8px 18px; border-radius: 8px; border: 1px solid #A7F3D0;">
+                            Score: {{ $moduleContent->score }}
+                        </div>
+                    </div>
+                @endif
+
+                <form action="{{ route('content.submit-quiz', $moduleContent->id) }}" method="POST">
+                    @csrf
+                    @php
+                        $questions = $contentable->questions ?? [];
+                    @endphp
+
+                    @foreach($questions as $qIndex => $q)
+                        <div style="margin-bottom: 24px; padding: 20px; background: white; border: 1px solid #E5E7EB; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                            <div style="display: flex; gap: 8px; align-items: flex-start; margin-bottom: 12px;">
+                                <span style="background: #4F46E5; color: white; border-radius: 9999px; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 2px;">
+                                    {{ $qIndex + 1 }}
+                                </span>
+                                <h4 style="margin: 0; font-size: 1rem; font-weight: 600; color: #111827; line-height: 1.4;">
+                                    {{ $q['question'] }}
+                                </h4>
+                            </div>
+
+                            @php
+                                $isMultipleChoice = count($q['correct_answers'] ?? []) > 1;
+                            @endphp
+
+                            <p style="margin: 0 0 12px 32px; font-size: 0.75rem; color: #6B7280; font-style: italic;">
+                                @if($isMultipleChoice)
+                                    (Select all correct answers - multiple selection supported)
+                                @else
+                                    (Select the correct answer)
+                                @endif
+                            </p>
+
+                            <div style="margin-left: 32px; display: flex; flex-direction: column; gap: 10px;">
+                                @foreach($q['options'] as $oIndex => $option)
+                                    <label style="display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 6px; cursor: pointer; transition: all 0.2s; user-select: none;">
+                                        <input type="checkbox" name="answers[{{ $qIndex }}][]" value="{{ $oIndex }}" style="width: 16px; height: 16px; accent-color: #4F46E5; cursor: pointer;">
+                                        <span style="font-size: 0.9rem; color: #374151; font-weight: 500;">
+                                            <strong style="color: #6B7280; margin-right: 4px;">{{ chr(65 + $oIndex) }}.</strong> {{ $option }}
+                                        </span>
+                                    </label>
+                                @endforeach
+                            </div>
+                        </div>
+                    @endforeach
+
+                    <div style="display: flex; justify-content: flex-end; margin-top: 20px;">
+                        <button type="submit" style="background-color: #4F46E5; color: white; border: none; padding: 12px 28px; border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2);">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                            </svg>
+                            {{ $moduleContent->is_completed ? 'Resubmit Quiz' : 'Submit Quiz Answers' }}
+                        </button>
+                    </div>
+                </form>
+            </div>
         @else
             <div style="color: #6B7280; text-align: center; padding: 40px;">
                 Content not available.

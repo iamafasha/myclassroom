@@ -8,6 +8,7 @@ use App\Models\NoteContent;
 use App\Models\PdfNotesContent;
 use App\Models\VideoContent;
 use App\Models\LinkContent;
+use App\Models\QuizContent;
 use App\Models\File;
 
 new class extends Component
@@ -32,10 +33,66 @@ new class extends Component
     public $linkDescription = '';
     public $isExercise = false;
     
+    public $quizDescription = '';
+    public $questions = [];
+    
     public function mount($moduleId)
     {
         $this->moduleId = $moduleId;
         $this->type = request()->query('type', 'note');
+        $this->addQuestion();
+    }
+
+    public function addQuestion()
+    {
+        $this->questions[] = [
+            'question' => '',
+            'options' => ['', ''],
+            'correct_answers' => [0],
+        ];
+    }
+
+    public function removeQuestion($index)
+    {
+        if (count($this->questions) > 1) {
+            unset($this->questions[$index]);
+            $this->questions = array_values($this->questions);
+        }
+    }
+
+    public function addOption($qIndex)
+    {
+        $this->questions[$qIndex]['options'][] = '';
+    }
+
+    public function removeOption($qIndex, $oIndex)
+    {
+        if (count($this->questions[$qIndex]['options']) > 2) {
+            unset($this->questions[$qIndex]['options'][$oIndex]);
+            $this->questions[$qIndex]['options'] = array_values($this->questions[$qIndex]['options']);
+            
+            $correct = $this->questions[$qIndex]['correct_answers'] ?? [];
+            $newCorrect = [];
+            foreach ($correct as $c) {
+                if ($c < $oIndex) {
+                    $newCorrect[] = $c;
+                } elseif ($c > $oIndex) {
+                    $newCorrect[] = $c - 1;
+                }
+            }
+            $this->questions[$qIndex]['correct_answers'] = array_values($newCorrect);
+        }
+    }
+
+    public function toggleCorrectAnswer($qIndex, $oIndex)
+    {
+        $correct = $this->questions[$qIndex]['correct_answers'] ?? [];
+        if (in_array($oIndex, $correct)) {
+            $correct = array_values(array_diff($correct, [$oIndex]));
+        } else {
+            $correct[] = $oIndex;
+        }
+        $this->questions[$qIndex]['correct_answers'] = array_values($correct);
     }
 
     public function save()
@@ -142,6 +199,18 @@ new class extends Component
             $contentable->url = $this->linkUrl;
             $contentable->description = $this->linkDescription;
             $contentable->save();
+        } elseif ($this->type === 'quiz') {
+            $this->validate([
+                'questions' => 'required|array|min:1',
+                'questions.*.question' => 'required|string',
+                'questions.*.options.*' => 'required|string',
+            ]);
+
+            $contentable = new QuizContent();
+            $contentable->title = $this->label;
+            $contentable->description = $this->quizDescription;
+            $contentable->questions = $this->questions;
+            $contentable->save();
         }
 
         $content = new Content();
@@ -182,6 +251,7 @@ new class extends Component
             <option value="pdf">PDF Document</option>
             <option value="video">Video Content</option>
             <option value="link">External Link</option>
+            <option value="quiz">Interactive Quiz</option>
         </select>
     </div>
     
@@ -280,6 +350,65 @@ new class extends Component
             <label class="block text-sm font-medium text-gray-700 mb-1">Description (Optional)</label>
             <textarea wire:model="linkDescription" rows="4" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="Brief description of what the student will find at this link..."></textarea>
             @error('linkDescription') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+        </div>
+    @elseif($type === 'quiz')
+        <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Quiz Instructions / Description (Optional)</label>
+            <textarea wire:model="quizDescription" rows="2" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="Brief instructions for students taking this quiz..."></textarea>
+            @error('quizDescription') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+        </div>
+
+        <div class="mb-6">
+            <div class="flex justify-between items-center mb-3">
+                <h3 class="text-base font-semibold text-gray-800">Quiz Questions & Objectives</h3>
+                <button type="button" wire:click="addQuestion" class="bg-indigo-50 text-indigo-600 border border-indigo-200 px-3 py-1 rounded text-xs font-semibold hover:bg-indigo-100 transition-colors">
+                    + Add Question
+                </button>
+            </div>
+
+            @foreach($questions as $qIndex => $q)
+                <div class="p-4 mb-4 border border-gray-200 bg-gray-50 rounded-lg relative">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-xs font-bold uppercase tracking-wider text-indigo-600">Question {{ $qIndex + 1 }}</span>
+                        @if(count($questions) > 1)
+                            <button type="button" wire:click="removeQuestion({{ $qIndex }})" class="text-red-500 text-xs hover:underline">
+                                Remove Question
+                            </button>
+                        @endif
+                    </div>
+
+                    <div class="mb-3">
+                        <input type="text" wire:model="questions.{{ $qIndex }}.question" class="w-full border-gray-300 rounded-md p-2 border text-sm bg-white" style="outline: none;" placeholder="Enter question objective (e.g. Which of the following are primary colors?)">
+                        @error('questions.'.$qIndex.'.question') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+                    </div>
+
+                    <div class="ml-2">
+                        <label class="block text-xs font-semibold text-gray-600 mb-2">Options (Check box to mark as correct answer):</label>
+                        @foreach($q['options'] as $oIndex => $option)
+                            <div class="flex items-center gap-2 mb-2">
+                                <input type="checkbox" 
+                                       wire:click="toggleCorrectAnswer({{ $qIndex }}, {{ $oIndex }})" 
+                                       @if(in_array($oIndex, $q['correct_answers'] ?? [])) checked @endif 
+                                       class="w-4 h-4 text-indigo-600 rounded cursor-pointer" 
+                                       title="Mark as correct answer">
+                                
+                                <input type="text" wire:model="questions.{{ $qIndex }}.options.{{ $oIndex }}" class="flex-1 border-gray-300 rounded p-1.5 border text-sm bg-white" style="outline: none;" placeholder="Option {{ chr(65 + $oIndex) }}">
+                                
+                                @if(count($q['options']) > 2)
+                                    <button type="button" wire:click="removeOption({{ $qIndex }}, {{ $oIndex }})" class="text-gray-400 hover:text-red-500 p-1 text-sm font-bold">
+                                        ✕
+                                    </button>
+                                @endif
+                            </div>
+                            @error('questions.'.$qIndex.'.options.'.$oIndex) <span class="text-red-500 text-xs block mb-1">{{ $message }}</span> @enderror
+                        @endforeach
+
+                        <button type="button" wire:click="addOption({{ $qIndex }})" class="text-xs text-indigo-600 font-semibold hover:underline mt-1">
+                            + Add Option
+                        </button>
+                    </div>
+                </div>
+            @endforeach
         </div>
     @endif
 

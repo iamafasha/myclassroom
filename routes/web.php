@@ -66,3 +66,31 @@ Route::post('/content/{moduleContent}/submit-exercise', function (Illuminate\Htt
     return back();
 })->name('content.submit-exercise');
 
+Route::post('/content/{moduleContent}/submit-quiz', function (Illuminate\Http\Request $request, App\Models\ModuleContent $moduleContent) {
+    $quiz = $moduleContent->content->contentable;
+    $questions = $quiz->questions ?? [];
+    
+    $userAnswers = $request->input('answers', []);
+    
+    $correctCount = 0;
+    $totalQuestions = count($questions);
+    
+    foreach ($questions as $qIndex => $q) {
+        $expected = array_map('intval', $q['correct_answers'] ?? []);
+        sort($expected);
+        
+        $given = isset($userAnswers[$qIndex]) ? array_map('intval', (array)$userAnswers[$qIndex]) : [];
+        sort($given);
+        
+        if ($expected === $given) {
+            $correctCount++;
+        }
+    }
+    
+    $moduleContent->score = $correctCount . '/' . $totalQuestions;
+    $moduleContent->is_completed = true;
+    $moduleContent->save();
+    
+    return back();
+})->name('content.submit-quiz');
+

@@ -362,7 +362,8 @@ new class extends Component
                             <a href="/modules/{{ $this->currentModule->id }}/content/create?type=note" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">Text Note</a>
                             <a href="/modules/{{ $this->currentModule->id }}/content/create?type=pdf" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">PDF Document</a>
                             <a href="/modules/{{ $this->currentModule->id }}/content/create?type=video" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">Video Content</a>
-                            <a href="/modules/{{ $this->currentModule->id }}/content/create?type=link" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none;">External Link</a>
+                            <a href="/modules/{{ $this->currentModule->id }}/content/create?type=link" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">External Link</a>
+                            <a href="/modules/{{ $this->currentModule->id }}/content/create?type=quiz" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none;">Interactive Quiz</a>
                         </div>
                     </div>
                 @endif
