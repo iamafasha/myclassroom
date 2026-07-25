@@ -32,7 +32,7 @@
                         @enderror
                     </div>
                     
-                    <button type="submit" class="btn-solve" style="width: 100%; justify-content: center;">
+                    <button type="button" class="btn-solve" style="width: 100%; justify-content: center;">
                         Upload Files
                     </button>
                 </form>
@@ -41,35 +41,34 @@
 document.addEventListener('DOMContentLoaded', function () {
     const form = document.getElementById('upload-form');
     const progressContainer = document.getElementById('upload-progress');
+    const fileInput = form.querySelector('input[name="files[]"]');
+    const nameField = form.querySelector('input[name="name"]');
+    const baseName = nameField ? nameField.value.trim() : '';
 
-    form.addEventListener('submit', function (e) {
-        e.preventDefault();
-        progressContainer.innerHTML = '';
-        const fileInput = form.querySelector('input[name="files[]"]');
+    fileInput.addEventListener('change', function () {
+        // Do not clear existing progress bars to allow concurrent uploads
         const files = fileInput.files;
-        const nameField = form.querySelector('input[name="name"]');
-        const baseName = nameField ? nameField.value.trim() : '';
-
-        Array.from(files).forEach((file, index) => {
+        Array.from(files).forEach((file, idx) => {
             const formData = new FormData();
             formData.append('files[]', file);
-            // If a base name is provided, use it with an index suffix, otherwise let server use original name
             if (baseName) {
-                formData.append('name[' + index + ']', baseName + '_' + (index + 1));
+                formData.append('name[' + idx + ']', baseName + '_' + (idx + 1));
             }
 
             const xhr = new XMLHttpRequest();
             const progressBar = document.createElement('div');
             progressBar.style.width = '100%';
-            progressBar.style.background = '#E5E7EB';
+            progressBar.style.background = 'var(--border-color)';
             progressBar.style.borderRadius = '4px';
             progressBar.style.marginTop = '8px';
+
             const progressFill = document.createElement('div');
             progressFill.style.width = '0%';
             progressFill.style.height = '8px';
-            progressFill.style.background = '#3B82F6';
+            progressFill.style.background = 'var(--primary-blue)';
             progressFill.style.borderRadius = '4px';
             progressBar.appendChild(progressFill);
+
             const label = document.createElement('div');
             label.textContent = 'Uploading ' + file.name;
             label.style.fontSize = '14px';
