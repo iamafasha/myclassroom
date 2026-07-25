@@ -17,25 +17,93 @@
         <!-- Upload Form -->
         <div class="content-card" style="flex: 1; flex-direction: column; align-items: flex-start; align-self: flex-start;">
             <h2 style="margin-top: 0; font-size: 18px;">Upload New File</h2>
-            <form action="{{ route('files.store') }}" method="POST" enctype="multipart/form-data" style="width: 100%; margin-top: 15px;">
-                @csrf
-                <div style="margin-bottom: 15px;">
-                    <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px;">File Name (Optional)</label>
-                    <input type="text" name="name" class="select-styled" placeholder="Leave empty to use original name" style="background-image: none;">
-                </div>
-                
-                <div style="margin-bottom: 20px;">
-                    <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px;">Select File</label>
-                    <input type="file" name="file" required style="width: 100%; padding: 10px; border: 1px dashed #D1D5DB; border-radius: 8px;">
-                    @error('file')
-                        <div style="color: #EF4444; font-size: 12px; margin-top: 5px;">{{ $message }}</div>
-                    @enderror
-                </div>
-                
-                <button type="submit" class="btn-solve" style="width: 100%; justify-content: center;">
-                    Upload File
-                </button>
-            </form>
+                <form id="upload-form" action="{{ route('files.store') }}" method="POST" enctype="multipart/form-data" style="width: 100%; margin-top: 15px;">
+                    @csrf
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px;">File Name (Optional)</label>
+    
+                    </div>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px;">Select Files</label>
+                        <input type="file" name="files[]" multiple required style="width: 100%; padding: 10px; border: 1px dashed #D1D5DB; border-radius: 8px;">
+                        @error('files')
+                            <div style="color: #EF4444; font-size: 12px; margin-top: 5px;">{{ $message }}</div>
+                        @enderror
+                    </div>
+                    
+                    <button type="submit" class="btn-solve" style="width: 100%; justify-content: center;">
+                        Upload Files
+                    </button>
+                </form>
+<div id="upload-progress" style="margin-top: 20px;"></div>
+            <script>
+document.addEventListener('DOMContentLoaded', function () {
+    const form = document.getElementById('upload-form');
+    const progressContainer = document.getElementById('upload-progress');
+
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        progressContainer.innerHTML = '';
+        const fileInput = form.querySelector('input[name="files[]"]');
+        const files = fileInput.files;
+        const nameField = form.querySelector('input[name="name"]');
+        const baseName = nameField ? nameField.value.trim() : '';
+
+        Array.from(files).forEach((file, index) => {
+            const formData = new FormData();
+            formData.append('files[]', file);
+            // If a base name is provided, use it with an index suffix, otherwise let server use original name
+            if (baseName) {
+                formData.append('name[' + index + ']', baseName + '_' + (index + 1));
+            }
+
+            const xhr = new XMLHttpRequest();
+            const progressBar = document.createElement('div');
+            progressBar.style.width = '100%';
+            progressBar.style.background = '#E5E7EB';
+            progressBar.style.borderRadius = '4px';
+            progressBar.style.marginTop = '8px';
+            const progressFill = document.createElement('div');
+            progressFill.style.width = '0%';
+            progressFill.style.height = '8px';
+            progressFill.style.background = '#3B82F6';
+            progressFill.style.borderRadius = '4px';
+            progressBar.appendChild(progressFill);
+            const label = document.createElement('div');
+            label.textContent = 'Uploading ' + file.name;
+            label.style.fontSize = '14px';
+            label.style.marginBottom = '4px';
+            progressContainer.appendChild(label);
+            progressContainer.appendChild(progressBar);
+
+            xhr.upload.addEventListener('progress', function (e) {
+                if (e.lengthComputable) {
+                    const percent = Math.round((e.loaded / e.total) * 100);
+                    progressFill.style.width = percent + '%';
+                }
+            });
+
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState === XMLHttpRequest.DONE) {
+                    if (xhr.status === 302 || xhr.status === 200) {
+                        label.textContent = file.name + ' uploaded successfully.';
+                        progressFill.style.background = '#10B981'; // green
+                    } else {
+                        label.textContent = 'Error uploading ' + file.name;
+                        progressFill.style.background = '#EF4444'; // red
+                    }
+                }
+            };
+
+            xhr.open('POST', form.action, true);
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            xhr.setRequestHeader('X-CSRF-TOKEN', csrfToken);
+            xhr.send(formData);
+        });
+    });
+});
+</script>
         </div>
 
         <!-- File List -->
