@@ -75,7 +75,7 @@ new #[Layout('layouts.app')] class extends Component
             'sort_order' => $maxOrder + 1,
         ]);
 
-        return redirect()->route('course.module.show', ['course' => $this->selectedCourseId, 'module' => $module->id]);
+        return redirect()->route('course.module.show', ['courseId' => $this->selectedCourseId, 'moduleId' => $module->id]);
     }
 
     public function toggleComplete($contentId)
