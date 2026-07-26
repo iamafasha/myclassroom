@@ -1,4 +1,4 @@
-@extends('layouts.app')
+@extends('layouts.app-old')
 
 @section('content')
 <div class="panel-list" style="width: 100%; padding: 40px; overflow-y: auto;">

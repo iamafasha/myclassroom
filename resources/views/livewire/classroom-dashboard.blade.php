@@ -1,11 +1,12 @@
 <?php
 
-use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
 use App\Models\Course;
 use App\Models\Module;
+use Livewire\Attributes\Layout;
+use Livewire\Volt\Component;
 
-new class extends Component
+new #[Layout('layouts.app')] class extends Component
 {
     public $selectedCourseId = null;
     public $selectedModuleId = null;
@@ -20,7 +21,6 @@ new class extends Component
     {
         $this->selectedCourseId = $courseId;
         $this->selectedModuleId = $moduleId;
-        
         if (!$this->selectedCourseId) {
             $firstCourse = Course::first();
             if ($firstCourse) {
@@ -271,7 +271,6 @@ new class extends Component
             </div>
             
           
-
             <div class="custom-select-dropdown" x-show="open" x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100" x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95" style="display: none;">
                 @foreach($this->courses as $course)
                     <a href="{{ route('course.show', $course->id) }}" wire:navigate style="display: block; text-decoration: none;"
@@ -288,7 +287,7 @@ new class extends Component
 
         <div class="module-list" style="padding-bottom: 50px;">
             @foreach($this->modules as $module)
-                <div wire:click="selectModule({{ $module->id }})" 
+                <a  href="{{ route('course.module.show', ['courseId' => $this->selectedCourseId, 'moduleId' => $module->id]) }}" wire:navigate 
                      x-data="{ isOver: false }"
                      @dragover.prevent="isOver = true"
                      @dragenter.prevent="isOver = true"
@@ -320,7 +319,7 @@ new class extends Component
                             </button>
                         </div>
                     </div>
-                </div>
+                </a>
             @endforeach
 
 

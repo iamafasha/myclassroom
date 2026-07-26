@@ -411,6 +411,7 @@
 
 
         <div class="main-layout">
+            @yield('content')
             {{ $slot ?? '' }}
         </div>
 

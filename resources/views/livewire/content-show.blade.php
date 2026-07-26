@@ -1,12 +1,24 @@
-@extends('layouts.app')
+<?php 
+use Livewire\Attributes\Layout;
+use Livewire\Volt\Component;
 
-@section('content')
+new #[Layout('layouts.app')] class extends Component
+{
+    public $moduleContent;
+
+    public function mount($moduleContent)
+    {
+        $this->moduleContent = \App\Models\ModuleContent::find($moduleContent);
+    }
+}
+?>
+
 <div class="panel-list" style="width: 100%; padding: 40px; overflow-y: auto;">
     <div class="content-header">
         @php
             $module = $moduleContent->module;
             $course = $module ? $module->course : null;
-            $backUrl = ($course && $module) ? route('course.module.show', ['course' => $course->id, 'module' => $module->id]) : route('home');
+            $backUrl = ($course && $module) ? route('course.module.show', ['courseId' => $course->id, 'moduleId' => $module->id]) : route('home');
         @endphp
         <a href="{{ $backUrl }}" wire:navigate style="color: #4F46E5; text-decoration: none; font-weight: 500; display: inline-block; margin-bottom: 15px;">&larr; Back to Dashboard</a>
         <h1 class="content-title" style="{{ $moduleContent->is_completed ? 'text-decoration: line-through; color: #6B7280;' : '' }}">{{ $moduleContent->label ?? 'Content' }}</h1>
@@ -516,4 +528,3 @@
         @endif
     </div>
 </div>
-@endsection
