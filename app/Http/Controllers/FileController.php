@@ -52,6 +52,8 @@ class FileController extends Controller
         $type = 'video';
     } elseif (in_array($extension, ['mp3', 'wav'])) {
         $type = 'audio';
+    }else{
+        $type = $extension ?? 'other';
     }
 
     File::create([

@@ -410,6 +410,10 @@ new #[Layout('layouts.app')] class extends Component
                     </div>
                 </form>
             </div>
+        @elseif($type == 'ImageContent')
+            <div>
+                <img src="{{ $contentable->file_url }}" alt="{{ $contentable->name }}">
+            </div>
         @else
             <div style="color: #6B7280; text-align: center; padding: 40px;">
                 Content not available.

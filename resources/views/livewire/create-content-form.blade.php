@@ -6,6 +6,7 @@ use App\Models\ModuleContent;
 use App\Models\NoteContent;
 use App\Models\PdfNotesContent;
 use App\Models\VideoContent;
+use App\Models\ImageContent;
 use App\Models\LinkContent;
 use App\Models\QuizContent;
 use App\Models\File;
@@ -35,6 +36,11 @@ new #[Layout('layouts.app')] class extends Component
     public $videoEndTime = '';
     public $videoFiles = [];
 
+    public $imageFileId = '';
+    public $imageSourceType = 'file';
+    public $imageExternalUrl;
+    public $imageFiles = [];
+
     public $linkUrl = '';
     public $linkDescription = '';
     public $isExercise = false;
@@ -48,6 +54,7 @@ new #[Layout('layouts.app')] class extends Component
         $this->moduleId = $moduleId;
         $this->pdfFiles = File::where('file_type', 'pdf')->get();
         $this->videoFiles = File::whereIn('file_type', ['video', 'mp4', 'mov', 'avi'])->get();
+        $this->imageFiles = File::whereIn('file_type', ['image', 'png', 'jpg', 'jpeg'])->get();
         $this->addQuestion();
     }
 
@@ -136,6 +143,7 @@ new #[Layout('layouts.app')] class extends Component
             $contentable->end_position = $this->pdfEndPage;
             $contentable->save();
         } elseif ($this->type === 'video') {
+            
             if ($this->videoSourceType === 'file') {
                 $this->validate([
                     'videoFileId' => 'required|exists:files,id',
@@ -210,7 +218,27 @@ new #[Layout('layouts.app')] class extends Component
             $contentable->url = $this->linkUrl;
             $contentable->description = $this->linkDescription;
             $contentable->save();
-        } elseif ($this->type === 'quiz') {
+        } elseif ($this->type === 'image') {
+
+                $this->validate([
+                    'imageSourceType' => 'required|in:file,url',
+                    'imageFileId' => 'required_if:imageSourceType,file|exists:files,id',
+                    'imageExternalUrl' => 'required_if:imageSourceType,url',
+                ]);
+
+                $file = File::find($this->imageFileId);
+
+                $contentable = new ImageContent();
+                $contentable->name = $this->label;
+            
+                if($this->imageSourceType == 'file'){
+                    $contentable->file_url = asset('storage/' . $file->file_path);
+                }else{
+                    $contentable->file_url = $this->imageExternalUrl;
+                }
+
+                $contentable->save();
+       } elseif ($this->type === 'quiz') {
             $this->validate([
                 'questions' => 'required|array|min:1',
                 'questions.*.question' => 'required|string',
@@ -258,6 +286,7 @@ new #[Layout('layouts.app')] class extends Component
             <option value="note">Text Note</option>
             <option value="pdf">PDF Document</option>
             <option value="video">Video Content</option>
+            <option value="image">Image Content</option>
             <option value="link">External Link</option>
             <option value="quiz">Interactive Quiz</option>
         </select>
@@ -329,6 +358,8 @@ new #[Layout('layouts.app')] class extends Component
                     @error('videoFileId') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
                     <p class="text-xs text-gray-500 mt-1">If your video is not here, <a href="{{ route('files.index') }}" class="text-indigo-600 hover:underline">upload it in the File Manager</a> first.</p>
                 </div>
+
+      
             @else
                 <div class="mb-4">
                     <label class="block text-sm font-medium text-gray-700 mb-1">Video URL (YouTube link, MP4 link, etc.)</label>
@@ -361,6 +392,43 @@ new #[Layout('layouts.app')] class extends Component
                 <textarea wire:model="linkDescription" rows="4" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="Brief description of what the student will find at this link..."></textarea>
                 @error('linkDescription') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
             </div>
+        @elseif($type === 'image')
+
+             <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-2">Image Source</label>
+                <div class="flex gap-4 mb-3">
+                    <label class="inline-flex items-center cursor-pointer">
+                        <input type="radio" wire:model.live="imageSourceType" value="file" class="form-radio text-indigo-600">
+                        <span class="ml-2 text-sm text-gray-700 font-medium">Uploaded File</span>
+                    </label>
+                    <label class="inline-flex items-center cursor-pointer">
+                        <input type="radio" wire:model.live="imageSourceType" value="url" class="form-radio text-indigo-600">
+                        <span class="ml-2 text-sm text-gray-700 font-medium">External URL</span>
+                    </label>
+                </div>
+            </div>
+
+            @if($imageSourceType == 'file')
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Select Image File</label>
+                <select wire:model="imageFileId" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;">
+                    <option value="">-- Choose an Image --</option>
+                    @foreach($imageFiles as $file)
+                        <option value="{{ $file->id }}">{{ $file->name }}</option>
+                    @endforeach
+                </select>
+                
+                @error('imageFileId') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+                <p class="text-xs text-gray-500 mt-1">If your image is not here, <a href="{{ route('files.index') }}" class="text-indigo-600 hover:underline">upload it in the File Manager</a> first.</p>
+            </div>
+            @else
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Image URL</label>
+                    <input type="url" wire:model="imageExternalUrl" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="https://....jpg">
+                    @error('imageExternalUrl') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+                </div>
+            @endif
+
         @elseif($type === 'quiz')
             <div class="mb-4">
                 <label class="block text-sm font-medium text-gray-700 mb-1">Quiz Instructions / Description (Optional)</label>
