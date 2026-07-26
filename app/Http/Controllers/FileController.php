@@ -17,55 +17,51 @@ class FileController extends Controller
 
     public function store(Request $request)
     {
-
-
         $request->validate([
-            'files' => 'required|array',
-            'files.*' => 'required|file|max:20480',
-            'name' => 'nullable|array',
-            'name.*' => 'nullable|string|max:255',
+            'file' => 'required',
+            'file' => 'file|max:20480',
+            'name' => 'nullable|string',
         ]);
 
-        $uploadedFiles = $request->file('files');
-        $names = $request->input('name', []);
+        $file = $request->file('file');
+        $originalName = $file->getClientOriginalName();
+        $fileName = $request->input('name') ?? $originalName;
+        $filePath = $file->store('uploads', 'public');
 
-        foreach ($uploadedFiles as $index => $uploadedFile) {
-            $originalName = $uploadedFile->getClientOriginalName();
-            $fileName = $originalName;
-            if (isset($names[$index]) && $names[$index] !== null && $names[$index] !== '') {
-                $fileName = $names[$index];
-            }
+        $extension = strtolower($file->getClientOriginalExtension());
 
-    $filePath = $uploadedFile->store('uploads', 'public');
+        $type = 'other';
+        
+        if (in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'svg'])) {
+            $type = 'image';
+        } elseif ($extension === 'pdf') {
+            $type = 'pdf';
+        } elseif (in_array($extension, ['doc', 'docx'])) {
+            $type = 'word';
+        } elseif (in_array($extension, ['xls', 'xlsx'])) {
+            $type = 'excel';
+        } elseif (in_array($extension, ['mp4', 'mov', 'avi'])) {
+            $type = 'video';
+        } elseif (in_array($extension, ['mp3', 'wav'])) {
+            $type = 'audio';
+        }else{
+            $type = $extension ?? 'other';
+        }
 
-    $extension = strtolower($uploadedFile->getClientOriginalExtension());
-    $type = 'other';
-    if (in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'svg'])) {
-        $type = 'image';
-    } elseif ($extension === 'pdf') {
-        $type = 'pdf';
-    } elseif (in_array($extension, ['doc', 'docx'])) {
-        $type = 'word';
-    } elseif (in_array($extension, ['xls', 'xlsx'])) {
-        $type = 'excel';
-    } elseif (in_array($extension, ['mp4', 'mov', 'avi'])) {
-        $type = 'video';
-    } elseif (in_array($extension, ['mp3', 'wav'])) {
-        $type = 'audio';
-    }else{
-        $type = $extension ?? 'other';
+        File::create([
+            'name' => $fileName,
+            'file_path' => $filePath,
+            'file_type' => $type,
+        ]);
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'File uploaded successfully.',
+            'file' => $file,
+        ]);
     }
 
-    File::create([
-        'name' => $fileName,
-        'file_path' => $filePath,
-        'file_type' => $type,
-    ]);
-}
 
-
-        return redirect()->route('files.index')->with('success', 'Files uploaded successfully.');
-    }
     
     public function destroy(File $file)
     {

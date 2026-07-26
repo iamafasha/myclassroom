@@ -17,42 +17,52 @@
         <!-- Upload Form -->
         <div class="content-card" style="flex: 1; flex-direction: column; align-items: flex-start; align-self: flex-start;">
             <h2 style="margin-top: 0; font-size: 18px;">Upload New File</h2>
-                <form id="upload-form" action="{{ route('files.store') }}" method="POST" enctype="multipart/form-data" style="width: 100%; margin-top: 15px;">
+                
+            <form id="upload-form" action="{{ route('files.store') }}" method="POST" enctype="multipart/form-data" style="width: 100%; margin-top: 15px;">
                     @csrf
                     <div style="margin-bottom: 15px;">
                         <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px;">File Name (Optional)</label>
-    
-                    </div>
-                    
-                    <div style="margin-bottom: 20px;">
-                        <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px;">Select Files</label>
-                        <input type="file" name="files[]" multiple required style="width: 100%; padding: 10px; border: 1px dashed #D1D5DB; border-radius: 8px;">
-                        @error('files')
+                        <input type="text" name="name" style="width: 100%; padding: 10px; border: 1px dashed #D1D5DB; border-radius: 8px;" placeholder="Enter file name" />
+                        @error('name')
                             <div style="color: #EF4444; font-size: 12px; margin-top: 5px;">{{ $message }}</div>
                         @enderror
                     </div>
                     
-                    <button type="button" class="btn-solve" style="width: 100%; justify-content: center;">
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px;">Select Files</label>
+                        <input type="file" name="file" required style="width: 100%; padding: 10px; border: 1px dashed #D1D5DB; border-radius: 8px;">
+                        @error('file')
+                            <div style="color: #EF4444; font-size: 12px; margin-top: 5px;">{{ $message }}</div>
+                        @enderror
+                    </div>
+                    
+                    <button type="submit" class="btn-solve" style="width: 100%; justify-content: center;">
                         Upload Files
                     </button>
                 </form>
-<div id="upload-progress" style="margin-top: 20px;"></div>
+
+            <div id="upload-progress" style="margin-top: 20px;"></div>
             <script>
 document.addEventListener('DOMContentLoaded', function () {
+
     const form = document.getElementById('upload-form');
     const progressContainer = document.getElementById('upload-progress');
-    const fileInput = form.querySelector('input[name="files[]"]');
-    const nameField = form.querySelector('input[name="name"]');
-    const baseName = nameField ? nameField.value.trim() : '';
 
-    fileInput.addEventListener('change', function () {
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        debugger
+        const fileInput = form.querySelector('input[name="file"]');
+        const nameField = form.querySelector('input[name="name"]');
+        const baseName = nameField ? nameField.value.trim() : '';
+        
         // Do not clear existing progress bars to allow concurrent uploads
-        const files = fileInput.files;
-        Array.from(files).forEach((file, idx) => {
+            const file = fileInput.files[0];
+            debugger
             const formData = new FormData();
-            formData.append('files[]', file);
+            formData.append('file', file);
             if (baseName) {
-                formData.append('name[' + idx + ']', baseName + '_' + (idx + 1));
+                formData.append('name', baseName);
             }
 
             const xhr = new XMLHttpRequest();
@@ -99,7 +109,6 @@ document.addEventListener('DOMContentLoaded', function () {
             const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
             xhr.setRequestHeader('X-CSRF-TOKEN', csrfToken);
             xhr.send(formData);
-        });
     });
 });
 </script>
