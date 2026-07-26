@@ -23,6 +23,7 @@ new #[Layout('layouts.app')] class extends Component
 
     public $label = '';
     public $noteText = '';
+    public $courseId;
 
     public $pdfFileId = '';
     public $pdfStartPage = '';
@@ -50,7 +51,8 @@ new #[Layout('layouts.app')] class extends Component
     
     public function mount($moduleId)
     {
-        
+        $module = Module::find($moduleId);
+        $this->courseId = $module->course_id;
         $this->moduleId = $moduleId;
         $this->pdfFiles = File::where('file_type', 'pdf')->get();
         $this->videoFiles = File::whereIn('file_type', ['video', 'mp4', 'mov', 'avi'])->get();
@@ -270,7 +272,7 @@ new #[Layout('layouts.app')] class extends Component
         $moduleContent->is_exercise = $this->isExercise;
         $moduleContent->save();
 
-        return redirect('/');
+        return redirect()->route('course.module.show', ['courseId' => $this->courseId, 'moduleId' => $this->moduleId]);
     }
     
 

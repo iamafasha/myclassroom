@@ -84,6 +84,11 @@
                 overflow-y: auto;
             }
 
+            .panel-content {
+                overflow-y: auto;
+                overflow-x: hidden;
+            }
+
             .course-selector {
                 margin-bottom: 20px;
             }
