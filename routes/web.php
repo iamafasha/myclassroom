@@ -59,7 +59,7 @@ Route::middleware('auth')->group(function () {
     })->name('content.submit-exercise');
 
     Route::post('/content/{moduleContent}/submit-quiz', function (Illuminate\Http\Request $request, App\Models\ModuleContent $moduleContent) {
-        $quiz = $moduleContent->content->contentable;
+        $quiz = $moduleContent->contents->first()?->contentable;
         $questions = $quiz->questions ?? [];
         
         $userAnswers = $request->input('answers', []);

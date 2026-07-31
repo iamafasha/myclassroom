@@ -13,8 +13,8 @@ class ModuleContent extends Model
         return $this->belongsTo(Module::class);
     }
 
-    public function content()
+    public function contents()
     {
-        return $this->belongsTo(Content::class);
+        return $this->belongsToMany(Content::class, 'content_module_content')->withTimestamps();
     }
 }

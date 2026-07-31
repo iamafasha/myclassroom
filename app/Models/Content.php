@@ -12,5 +12,10 @@ class Content extends Model
     {
         return $this->morphTo();
     }
-    
+
+    public function moduleContents()
+    {
+        return $this->belongsToMany(ModuleContent::class, 'content_module_content')->withTimestamps();
+    }
+
 }

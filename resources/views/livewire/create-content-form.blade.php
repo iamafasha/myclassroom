@@ -265,12 +265,12 @@ new #[Layout('layouts.app')] class extends Component
 
         $moduleContent = new ModuleContent();
         $moduleContent->module_id = $this->moduleId;
-        $moduleContent->content_id = $content->id;
         $moduleContent->label = $this->label;
         $moduleContent->slug = \Illuminate\Support\Str::slug($this->label . '-' . time());
         $moduleContent->sort_order = $maxOrder + 1;
         $moduleContent->is_exercise = $this->isExercise;
         $moduleContent->save();
+        $moduleContent->contents()->attach($content->id);
 
         return redirect()->route('course.module.show', ['courseId' => $this->courseId, 'moduleId' => $this->moduleId]);
     }

@@ -26,7 +26,7 @@ new #[Layout('layouts.app')] class extends Component
 
     <div class="content-card" style="margin-top: 20px;  display: block;">
         @php
-            $contentable = $moduleContent->content->contentable ?? null;
+            $contentable = $moduleContent->contents->first()?->contentable ?? null;
             $type = $contentable ? class_basename($contentable) : 'Unknown';
         @endphp
 

@@ -91,7 +91,7 @@ new #[Layout('layouts.app')] class extends Component
     {
         $moduleContent = \App\Models\ModuleContent::find($contentId);
         if ($moduleContent) {
-            $content = $moduleContent->content;
+            $content = $moduleContent->contents->first();
             if ($content) {
                 $contentable = $content->contentable;
                 if ($contentable) {
@@ -250,7 +250,7 @@ new #[Layout('layouts.app')] class extends Component
         if (!$this->selectedModuleId) {
             return collect();
         }
-        $module = Module::with('moduleContents.content.contentable')->find($this->selectedModuleId);
+        $module = Module::with('moduleContents.contents.contentable')->find($this->selectedModuleId);
         return $module ? $module->moduleContents : collect();
     }
 };
@@ -382,8 +382,9 @@ new #[Layout('layouts.app')] class extends Component
                             {{ $moduleContent->label ?? 'Unnamed Content' }}
                         </div>
                         <div class="content-details" style="margin-top: 4px; display: flex; align-items: center; gap: 6px;">
-                            @if($moduleContent->content && $moduleContent->content->contentable)
-                                <span class="badge badge-medium">{{ str_replace('Content', '', class_basename($moduleContent->content->contentable_type)) }}</span>
+                            @php($firstContent = $moduleContent->contents->first())
+                            @if($firstContent && $firstContent->contentable)
+                                <span class="badge badge-medium">{{ str_replace('Content', '', class_basename($firstContent->contentable_type)) }}</span>
                             @else
                                 <span class="badge badge-medium">Unknown</span>
                             @endif
