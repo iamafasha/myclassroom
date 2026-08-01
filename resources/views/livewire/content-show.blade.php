@@ -10,6 +10,38 @@ new #[Layout('layouts.app')] class extends Component
     {
         $this->moduleContent = \App\Models\ModuleContent::find($moduleContent);
     }
+
+    public function moveContentItemUp($contentId)
+    {
+        $this->reorderContentItem($contentId, -1);
+    }
+
+    public function moveContentItemDown($contentId)
+    {
+        $this->reorderContentItem($contentId, 1);
+    }
+
+    private function reorderContentItem($contentId, $direction)
+    {
+        $items = $this->moduleContent->contents()->get();
+        foreach ($items as $i => $item) {
+            $this->moduleContent->contents()->updateExistingPivot($item->id, ['sort_order' => $i]);
+        }
+
+        $items = $this->moduleContent->contents()->get();
+        $index = $items->search(fn ($c) => $c->id == $contentId);
+        $targetIndex = $index === false ? null : $index + $direction;
+
+        if ($index !== false && $targetIndex !== null && $targetIndex >= 0 && $targetIndex < $items->count()) {
+            $current = $items[$index];
+            $target = $items[$targetIndex];
+
+            $this->moduleContent->contents()->updateExistingPivot($current->id, ['sort_order' => $targetIndex]);
+            $this->moduleContent->contents()->updateExistingPivot($target->id, ['sort_order' => $index]);
+        }
+
+        $this->moduleContent->load('contents');
+    }
 }
 ?>
 
@@ -45,24 +77,37 @@ new #[Layout('layouts.app')] class extends Component
 
     <div class="content-card" style="margin-top: 20px;  display: block;">
         @php
-            function timeToSeconds($time) {
-                if (!$time) return null;
-                $parts = explode(':', $time);
-                if (count($parts) == 2) {
-                    return ($parts[0] * 60) + $parts[1];
+            if (!function_exists('timeToSeconds')) {
+                function timeToSeconds($time) {
+                    if (!$time) return null;
+                    $parts = explode(':', $time);
+                    if (count($parts) == 2) {
+                        return ($parts[0] * 60) + $parts[1];
+                    }
+                    if (count($parts) == 3) {
+                        return ($parts[0] * 3600) + ($parts[1] * 60) + $parts[2];
+                    }
+                    return null;
                 }
-                if (count($parts) == 3) {
-                    return ($parts[0] * 3600) + ($parts[1] * 60) + $parts[2];
-                }
-                return null;
             }
 
-            function getYoutubeId($url) {
-                if (preg_match('/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/', $url, $matches)) {
-                    return $matches[1];
+            if (!function_exists('getYoutubeId')) {
+                function getYoutubeId($url) {
+                    if (preg_match('/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/', $url, $matches)) {
+                        return $matches[1];
+                    }
+                    return null;
                 }
-                return null;
             }
+
+            $contentTypeLabels = [
+                'NoteContent' => 'Text Note',
+                'PdfNotesContent' => 'PDF Document',
+                'VideoContent' => 'Video',
+                'LinkContent' => 'External Link',
+                'QuizContent' => 'Quiz',
+                'ImageContent' => 'Image',
+            ];
         @endphp
 
         @forelse($moduleContent->contents as $index => $singleContent)
@@ -74,6 +119,15 @@ new #[Layout('layouts.app')] class extends Component
 
             <div style="{{ !$loop->first ? 'margin-top: 30px; padding-top: 30px; border-top: 1px solid #E5E7EB;' : '' }}">
 
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <span style="font-size: 0.75rem; font-weight: 700; color: #6B7280; text-transform: uppercase; letter-spacing: 0.05em;">{{ $contentTypeLabels[$type] ?? 'Content' }}</span>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <button wire:click="moveContentItemUp({{ $singleContent->id }})" @if($loop->first) disabled @endif title="Move up" style="width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; background: white; border: 1px solid #D1D5DB; border-radius: 6px; cursor: {{ $loop->first ? 'not-allowed' : 'pointer' }}; opacity: {{ $loop->first ? '0.4' : '1' }}; color: #374151;">&uarr;</button>
+                    <button wire:click="moveContentItemDown({{ $singleContent->id }})" @if($loop->last) disabled @endif title="Move down" style="width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; background: white; border: 1px solid #D1D5DB; border-radius: 6px; cursor: {{ $loop->last ? 'not-allowed' : 'pointer' }}; opacity: {{ $loop->last ? '0.4' : '1' }}; color: #374151;">&darr;</button>
+                    <a href="{{ route('content.edit', ['moduleContentId' => $moduleContent->id, 'contentId' => $singleContent->id]) }}" wire:navigate style="margin-left: 4px; padding: 6px 12px; background: white; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.8rem; font-weight: 600; color: #4F46E5; text-decoration: none;">Edit</a>
+                </div>
+            </div>
+
             @if($type === 'NoteContent')
                 <div style="line-height: 1.6; color: #374151;">
                     {!! nl2br(e($contentable->content)) !!}
@@ -84,6 +138,8 @@ new #[Layout('layouts.app')] class extends Component
                     $pdfUrl = $contentable->file_url;
                     $startPage = $contentable->start_position ? (int)$contentable->start_position : 1;
                     $endPage = $contentable->end_position ? (int)$contentable->end_position : 'null';
+                    $startPercent = $contentable->start_percentage ?? 0;
+                    $endPercent = $contentable->end_percentage ?? 100;
                 @endphp
 
                 @once
@@ -110,11 +166,28 @@ new #[Layout('layouts.app')] class extends Component
                         const url = "{{ $pdfUrl }}";
                         const startPage = {{ $startPage }};
                         let endPage = {{ $endPage }};
+                        const startPercent = {{ $startPercent }};
+                        const endPercent = {{ $endPercent }};
                         const container = document.getElementById('pdf-container-{{ $uid }}');
                         const loading = document.getElementById('pdf-loading-{{ $uid }}');
 
                         let currentScale = 1.5;
                         let loadedPdf = null;
+
+                        function insertSorted(el, pageNum) {
+                            el.dataset.page = pageNum;
+                            let inserted = false;
+                            for (let i = 0; i < container.children.length; i++) {
+                                if (container.children[i].dataset && parseInt(container.children[i].dataset.page) > pageNum) {
+                                    container.insertBefore(el, container.children[i]);
+                                    inserted = true;
+                                    break;
+                                }
+                            }
+                            if (!inserted) {
+                                container.appendChild(el);
+                            }
+                        }
 
                         function renderPages(pdf, scale) {
                             container.innerHTML = '';
@@ -126,7 +199,7 @@ new #[Layout('layouts.app')] class extends Component
                                     const ctx = canvas.getContext('2d');
                                     canvas.height = viewport.height;
                                     canvas.width = viewport.width;
-                                    canvas.style.boxShadow = '0 4px 6px -1px rgba(0,0,0,0.1)';
+                                    canvas.style.display = 'block';
 
                                     const renderContext = {
                                         canvasContext: ctx,
@@ -134,17 +207,26 @@ new #[Layout('layouts.app')] class extends Component
                                     };
                                     page.render(renderContext);
 
-                                    canvas.dataset.page = pageNum;
-                                    let inserted = false;
-                                    for (let i = 0; i < container.children.length; i++) {
-                                        if (container.children[i].dataset && parseInt(container.children[i].dataset.page) > pageNum) {
-                                            container.insertBefore(canvas, container.children[i]);
-                                            inserted = true;
-                                            break;
-                                        }
-                                    }
-                                    if (!inserted) {
-                                        container.appendChild(canvas);
+                                    const topPct = (pageNum === startPage) ? startPercent : 0;
+                                    const bottomPct = (pageNum === endPage) ? endPercent : 100;
+
+                                    if (topPct > 0 || bottomPct < 100) {
+                                        const topSkip = viewport.height * (topPct / 100);
+                                        const visibleHeight = Math.max(0, viewport.height * ((bottomPct - topPct) / 100));
+
+                                        const wrapper = document.createElement('div');
+                                        wrapper.style.overflow = 'hidden';
+                                        wrapper.style.width = viewport.width + 'px';
+                                        wrapper.style.height = visibleHeight + 'px';
+                                        wrapper.style.boxShadow = '0 4px 6px -1px rgba(0,0,0,0.1)';
+
+                                        canvas.style.marginTop = (-topSkip) + 'px';
+                                        wrapper.appendChild(canvas);
+
+                                        insertSorted(wrapper, pageNum);
+                                    } else {
+                                        canvas.style.boxShadow = '0 4px 6px -1px rgba(0,0,0,0.1)';
+                                        insertSorted(canvas, pageNum);
                                     }
                                 });
                             }

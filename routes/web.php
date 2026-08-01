@@ -11,6 +11,7 @@ Route::middleware('auth')->group(function () {
     \Livewire\Volt\Volt::route('/courses', 'courses.index')->name('courses.index');
     \Livewire\Volt\Volt::route('/course/{courseId}', 'classroom-dashboard')->name('course.show');
     \Livewire\Volt\Volt::route('/content/{moduleContentId}/add', 'create-content-form')->name('content.create');
+    \Livewire\Volt\Volt::route('/content/{moduleContentId}/edit/{contentId}', 'create-content-form')->name('content.edit');
     \Livewire\Volt\Volt::route('/course/{courseId}/module/{moduleId}', 'classroom-dashboard')->name('course.module.show');
     \Livewire\Volt\Volt::route('/content/{moduleContent}', 'content-show')->name('content.show');
 
