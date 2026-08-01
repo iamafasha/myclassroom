@@ -1,6 +1,5 @@
 <?php
 
-use App\Models\Module;
 use App\Models\Content;
 use App\Models\ModuleContent;
 use App\Models\NoteContent;
@@ -17,8 +16,9 @@ use Livewire\Volt\Component;
 
 new #[Layout('layouts.app')] class extends Component
 {
+    public $moduleContentId;
     public $moduleId;
-    #[Url] 
+    #[Url]
     public $type = 'note';
 
     public $label = '';
@@ -49,11 +49,14 @@ new #[Layout('layouts.app')] class extends Component
     public $quizDescription = '';
     public $questions = [];
     
-    public function mount($moduleId)
+    public function mount($moduleContentId)
     {
-        $module = Module::find($moduleId);
-        $this->courseId = $module->course_id;
-        $this->moduleId = $moduleId;
+        $moduleContent = ModuleContent::findOrFail($moduleContentId);
+        $this->moduleContentId = $moduleContentId;
+        $this->moduleId = $moduleContent->module_id;
+        $this->courseId = $moduleContent->module->course_id;
+        $this->label = $moduleContent->label ?? '';
+        $this->isExercise = (bool) $moduleContent->is_exercise;
         $this->pdfFiles = File::where('file_type', 'pdf')->get();
         $this->videoFiles = File::whereIn('file_type', ['video', 'mp4', 'mov', 'avi'])->get();
         $this->imageFiles = File::whereIn('file_type', ['image', 'png', 'jpg', 'jpeg'])->get();
@@ -259,20 +262,18 @@ new #[Layout('layouts.app')] class extends Component
         $content->contentable_type = get_class($contentable);
         $content->save();
 
-
-
-        $maxOrder = ModuleContent::where('module_id', $this->moduleId)->max('sort_order') ?? 0;
-
-        $moduleContent = new ModuleContent();
-        $moduleContent->module_id = $this->moduleId;
-        $moduleContent->label = $this->label;
-        $moduleContent->slug = \Illuminate\Support\Str::slug($this->label . '-' . time());
-        $moduleContent->sort_order = $maxOrder + 1;
+        $moduleContent = ModuleContent::findOrFail($this->moduleContentId);
+        if (!$moduleContent->label) {
+            $moduleContent->label = $this->label;
+        }
+        if (!$moduleContent->slug) {
+            $moduleContent->slug = \Illuminate\Support\Str::slug($this->label . '-' . time());
+        }
         $moduleContent->is_exercise = $this->isExercise;
         $moduleContent->save();
         $moduleContent->contents()->attach($content->id);
 
-        return redirect()->route('course.module.show', ['courseId' => $this->courseId, 'moduleId' => $this->moduleId]);
+        return redirect()->route('content.show', $moduleContent->id);
     }
     
 
@@ -503,7 +504,7 @@ new #[Layout('layouts.app')] class extends Component
     </div>
 
     <div class="flex justify-end space-x-3 gap-3">
-        <a href="/" class="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 text-decoration-none inline-block">Cancel</a>
+        <a href="{{ route('content.show', $moduleContentId) }}" class="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 text-decoration-none inline-block">Cancel</a>
         <button wire:click="save" class="px-4 py-2 bg-indigo-600 border border-transparent rounded-md text-sm font-medium text-white hover:bg-indigo-700 cursor-pointer border-0">Save Content</button>
     </div>
 </div>

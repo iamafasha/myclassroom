@@ -91,8 +91,7 @@ new #[Layout('layouts.app')] class extends Component
     {
         $moduleContent = \App\Models\ModuleContent::find($contentId);
         if ($moduleContent) {
-            $content = $moduleContent->contents->first();
-            if ($content) {
+            foreach ($moduleContent->contents as $content) {
                 $contentable = $content->contentable;
                 if ($contentable) {
                     $contentable->delete();
@@ -101,6 +100,22 @@ new #[Layout('layouts.app')] class extends Component
             }
             $moduleContent->delete();
         }
+    }
+
+    public function addContent()
+    {
+        if (!$this->selectedModuleId) {
+            return;
+        }
+
+        $maxOrder = \App\Models\ModuleContent::where('module_id', $this->selectedModuleId)->max('sort_order') ?? 0;
+
+        $moduleContent = \App\Models\ModuleContent::create([
+            'module_id' => $this->selectedModuleId,
+            'sort_order' => $maxOrder + 1,
+        ]);
+
+        return redirect()->route('content.show', $moduleContent->id);
     }
 
     public function deleteModule($moduleId)
@@ -340,22 +355,9 @@ new #[Layout('layouts.app')] class extends Component
                     <h1 class="content-title">{{ $this->currentModule ? $this->currentModule->title : 'No topic selected' }}</h1>
                 </div>
                 @if($this->currentModule)
-                    <div x-data="{ open: false }" style="position: relative; display: inline-block;">
-                        <button @click="open = !open" style="background-color: #4F46E5; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; transition: background-color 0.2s;">
-                            + Add Content
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" :style="open ? 'transform: rotate(180deg); transition: transform 0.2s;' : 'transition: transform 0.2s;'">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                            </svg>
-                        </button>
-                        <div x-show="open" @click.outside="open = false" x-transition style="display: none; position: absolute; right: 0; margin-top: 0.5rem; width: 12rem; background-color: white; border-radius: 0.375rem; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); border: 1px solid #E5E7EB; z-index: 50;">
-                            <a href="/modules/{{ $this->currentModule->id }}/content/create?type=note" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">Text Note</a>
-                            <a href="/modules/{{ $this->currentModule->id }}/content/create?type=pdf" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">PDF Document</a>
-                            <a href="/modules/{{ $this->currentModule->id }}/content/create?type=image" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">Image Content</a>
-                            <a href="/modules/{{ $this->currentModule->id }}/content/create?type=video" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">Video Content</a>
-                            <a href="/modules/{{ $this->currentModule->id }}/content/create?type=link" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">External Link</a>
-                            <a href="/modules/{{ $this->currentModule->id }}/content/create?type=quiz" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none;">Interactive Quiz</a>
-                        </div>
-                    </div>
+                    <button wire:click="addContent" style="background-color: #4F46E5; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; transition: background-color 0.2s;">
+                        + Add Content
+                    </button>
                 @endif
             </div>
         @else

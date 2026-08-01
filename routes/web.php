@@ -10,7 +10,7 @@ Route::middleware('auth')->group(function () {
     \Livewire\Volt\Volt::route('/classes/{classroom}/courses/add', 'classes.courses-add')->name('classes.courses.add');
     \Livewire\Volt\Volt::route('/courses', 'courses.index')->name('courses.index');
     \Livewire\Volt\Volt::route('/course/{courseId}', 'classroom-dashboard')->name('course.show');
-    \Livewire\Volt\Volt::route('/modules/{moduleId}/content/create', 'create-content-form')->name('content.create');
+    \Livewire\Volt\Volt::route('/content/{moduleContentId}/add', 'create-content-form')->name('content.create');
     \Livewire\Volt\Volt::route('/course/{courseId}/module/{moduleId}', 'classroom-dashboard')->name('course.module.show');
     \Livewire\Volt\Volt::route('/content/{moduleContent}', 'content-show')->name('content.show');
 
@@ -59,7 +59,7 @@ Route::middleware('auth')->group(function () {
     })->name('content.submit-exercise');
 
     Route::post('/content/{moduleContent}/submit-quiz', function (Illuminate\Http\Request $request, App\Models\ModuleContent $moduleContent) {
-        $quiz = $moduleContent->contents->first()?->contentable;
+        $quiz = $moduleContent->contents->first(fn ($content) => $content->contentable instanceof App\Models\QuizContent)?->contentable;
         $questions = $quiz->questions ?? [];
         
         $userAnswers = $request->input('answers', []);
