@@ -15,6 +15,10 @@ class ModuleContent extends Model
 
     public function contents()
     {
-        return $this->belongsToMany(Content::class, 'content_module_content')->withTimestamps();
+        return $this->belongsToMany(Content::class, 'content_module_content')
+            ->withPivot('sort_order')
+            ->withTimestamps()
+            ->orderByPivot('sort_order')
+            ->orderByPivot('id');
     }
 }
