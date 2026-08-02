@@ -65,7 +65,6 @@ new #[Layout('layouts.app')] class extends Component
         $this->moduleId = $moduleContent->module_id;
         $this->courseId = $moduleContent->module->course_id;
         $this->label = $moduleContent->label ?? '';
-        $this->isExercise = (bool) $moduleContent->is_exercise;
         $this->pdfFiles = File::where('file_type', 'pdf')->get();
         $this->videoFiles = File::whereIn('file_type', ['video', 'mp4', 'mov', 'avi'])->get();
         $this->imageFiles = File::whereIn('file_type', ['image', 'png', 'jpg', 'jpeg'])->get();
@@ -77,6 +76,9 @@ new #[Layout('layouts.app')] class extends Component
             $this->contentId = $contentId;
             $this->isEditing = true;
             $this->loadContentable($content->contentable);
+
+            $pivot = $moduleContent->contents()->where('content_id', $contentId)->first()?->pivot;
+            $this->isExercise = (bool) $pivot?->is_exercise;
         }
 
         if (empty($this->questions)) {
@@ -399,8 +401,9 @@ new #[Layout('layouts.app')] class extends Component
             if (!$moduleContent->slug) {
                 $moduleContent->slug = \Illuminate\Support\Str::slug($this->label . '-' . time());
             }
-            $moduleContent->is_exercise = $this->isExercise;
             $moduleContent->save();
+
+            $moduleContent->contents()->updateExistingPivot($this->contentId, ['is_exercise' => $this->isExercise]);
         } else {
             $content = new Content();
             $content->contentable_id = $contentable->id;
@@ -414,14 +417,13 @@ new #[Layout('layouts.app')] class extends Component
             if (!$moduleContent->slug) {
                 $moduleContent->slug = \Illuminate\Support\Str::slug($this->label . '-' . time());
             }
-            $moduleContent->is_exercise = $this->isExercise;
             $moduleContent->save();
 
             $maxOrder = \Illuminate\Support\Facades\DB::table('content_module_content')
                 ->where('module_content_id', $moduleContent->id)
                 ->max('sort_order') ?? 0;
 
-            $moduleContent->contents()->attach($content->id, ['sort_order' => $maxOrder + 1]);
+            $moduleContent->contents()->attach($content->id, ['sort_order' => $maxOrder + 1, 'is_exercise' => $this->isExercise]);
         }
 
         return redirect()->route('content.show', $this->moduleContentId);

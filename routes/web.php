@@ -23,7 +23,7 @@ Route::middleware('auth')->group(function () {
         return back();
     })->name('content.toggle-complete');
 
-    Route::post('/content/{moduleContent}/submit-exercise', function (Illuminate\Http\Request $request, App\Models\ModuleContent $moduleContent) {
+    Route::post('/content/{moduleContent}/content/{content}/submit-exercise', function (Illuminate\Http\Request $request, App\Models\ModuleContent $moduleContent, App\Models\Content $content) {
         $request->validate([
             'submission_link' => 'nullable|url',
             'submission_file' => 'nullable|file|max:51200',
@@ -36,22 +36,28 @@ Route::middleware('auth')->group(function () {
             return back()->withErrors(['exercise' => 'Please provide an answer link, upload a file, or enter a score before submitting.']);
         }
 
+        $pivot = App\Models\ContentModuleContent::where('module_content_id', $moduleContent->id)
+            ->where('content_id', $content->id)
+            ->firstOrFail();
+
         if ($request->submission_link) {
-            $moduleContent->submission_link = $request->submission_link;
+            $pivot->submission_link = $request->submission_link;
         }
 
         if ($request->hasFile('submission_file')) {
             $path = $request->file('submission_file')->store('exercise_submissions', 'public');
-            $moduleContent->submission_file_path = $path;
+            $pivot->submission_file_path = $path;
         }
 
         if ($request->filled('obtained_score') && $request->filled('total_score')) {
-            $moduleContent->score = $request->obtained_score . '/' . $request->total_score;
+            $pivot->score = $request->obtained_score . '/' . $request->total_score;
         } elseif ($request->filled('obtained_score')) {
-            $moduleContent->score = $request->obtained_score;
+            $pivot->score = $request->obtained_score;
         } elseif ($request->has('score')) {
-            $moduleContent->score = $request->score;
+            $pivot->score = $request->score;
         }
+
+        $pivot->save();
 
         $moduleContent->is_completed = true;
         $moduleContent->save();

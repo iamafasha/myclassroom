@@ -384,14 +384,17 @@ new #[Layout('layouts.app')] class extends Component
                             {{ $moduleContent->label ?? 'Unnamed Content' }}
                         </div>
                         <div class="content-details" style="margin-top: 4px; display: flex; align-items: center; gap: 6px;">
-                            @php($firstContent = $moduleContent->contents->first())
+                            @php
+                                $firstContent = $moduleContent->contents->first();
+                                $exerciseContents = $moduleContent->contents->filter(fn ($c) => $c->pivot->is_exercise);
+                            @endphp
                             @if($firstContent && $firstContent->contentable)
                                 <span class="badge badge-medium">{{ str_replace('Content', '', class_basename($firstContent->contentable_type)) }}</span>
                             @else
                                 <span class="badge badge-medium">Unknown</span>
                             @endif
 
-                            @if($moduleContent->is_exercise)
+                            @if($exerciseContents->isNotEmpty())
                                 <span style="font-size: 0.75rem; color: #D97706; background: #FEF3C7; border: 1px solid #FCD34D; padding: 2px 8px; border-radius: 9999px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
                                     📝 Exercise
                                 </span>
@@ -402,6 +405,14 @@ new #[Layout('layouts.app')] class extends Component
                                     Score: {{ $moduleContent->score }}
                                 </span>
                             @endif
+
+                            @foreach($exerciseContents as $exerciseContent)
+                                @if($exerciseContent->pivot->score)
+                                    <span style="font-size: 0.75rem; color: #92400E; background: #FDE68A; border: 1px solid #F59E0B; padding: 2px 8px; border-radius: 9999px; font-weight: 700; display: inline-flex; align-items: center;">
+                                        Score: {{ $exerciseContent->pivot->score }}
+                                    </span>
+                                @endif
+                            @endforeach
                             
                             @if($moduleContent->is_completed)
                                 <span style="font-size: 0.75rem; color: #059669; background: #ECFDF5; border: 1px solid #A7F3D0; padding: 2px 8px; border-radius: 9999px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
