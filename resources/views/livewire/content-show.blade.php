@@ -810,6 +810,32 @@ new #[Layout('layouts.app')] class extends Component
                                     No link yet — your instructor will share it.
                                 </span>
                             @endif
+
+                            @if($status !== 'ended')
+                                <div x-data="{ open: false }" @click.outside="open = false" style="position: relative;">
+                                    <button type="button" @click="open = !open"
+                                            style="display: inline-flex; align-items: center; gap: 6px; background: white; color: #374151; border: 1px solid #D1D5DB; padding: 8px 14px; border-radius: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer;">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                        </svg>
+                                        Add to calendar
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" :style="open ? 'transform: rotate(180deg);' : ''">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                    </button>
+
+                                    <div x-show="open" x-transition style="display: none; position: absolute; top: 100%; right: 0; margin-top: 6px; background: white; border: 1px solid #E5E7EB; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); min-width: 210px; z-index: 40; overflow: hidden;">
+                                        <a href="{{ $contentable->googleCalendarUrl() }}" target="_blank" rel="noopener noreferrer" @click="open = false"
+                                           style="display: block; padding: 10px 14px; font-size: 0.85rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">
+                                            Google Calendar
+                                        </a>
+                                        <a href="{{ route('live-class.ics', $contentable->id) }}" @click="open = false"
+                                           style="display: block; padding: 10px 14px; font-size: 0.85rem; color: #374151; text-decoration: none;">
+                                            Apple / Outlook (.ics)
+                                        </a>
+                                    </div>
+                                </div>
+                            @endif
                         </div>
                     </div>
 

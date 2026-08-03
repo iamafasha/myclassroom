@@ -16,6 +16,15 @@ Route::middleware('auth')->group(function () {
     \Livewire\Volt\Volt::route('/content/{moduleContent}', 'content-show')->name('content.show');
 
     \Livewire\Volt\Volt::route('/files', 'files.index')->name('files.index');
+
+    Route::get('/live-class/{liveClass}/calendar.ics', function (App\Models\LiveClassContent $liveClass) {
+        abort_unless($liveClass->isVisibleTo(auth()->user()), 403);
+
+        return response($liveClass->toIcs(), 200, [
+            'Content-Type' => 'text/calendar; charset=utf-8',
+            'Content-Disposition' => 'attachment; filename="' . Illuminate\Support\Str::slug($liveClass->calendarTitle()) . '.ics"',
+        ]);
+    })->name('live-class.ics');
     
     Route::post('/content/{moduleContent}/toggle-complete', function (App\Models\ModuleContent $moduleContent) {
         $moduleContent->is_completed = !$moduleContent->is_completed;

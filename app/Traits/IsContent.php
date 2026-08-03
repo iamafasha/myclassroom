@@ -2,7 +2,7 @@
 
 namespace App\Traits;
 
-use App\Traits\Content;
+use App\Models\Content;
 
 trait IsContent
 {

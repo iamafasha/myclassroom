@@ -11,9 +11,10 @@
         @livewireStyles
         <style>
             :root {
-                --sidebar-width: 60px;
+                --sidebar-width: 72px;
                 --panel-list-width: 420px;
                 --bg-main: #ffffff;
+                --bg-shell: #F3F1F6;
                 --text-primary: #111827;
                 --text-secondary: #6B7280;
                 --primary-blue: #2563EB;
@@ -22,56 +23,88 @@
 
             * { box-sizing: border-box; }
 
+            [x-cloak] { display: none !important; }
+
             body {
                 margin: 0;
                 font-family: 'Inter', system-ui, -apple-system, sans-serif;
-                background-color: var(--bg-main);
+                background-color: var(--bg-shell);
                 color: var(--text-primary);
                 display: flex;
                 height: 100vh;
                 overflow: hidden;
+                padding: 12px;
+                gap: 12px;
             }
 
             .sidebar {
                 width: var(--sidebar-width);
                 background-color: #ffffff;
-                border-right: 1px solid var(--border-color);
+                border-radius: 20px;
                 display: flex;
                 flex-direction: column;
                 align-items: center;
-                padding: 15px 0;
+                padding: 20px 0;
                 flex-shrink: 0;
+                box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.05);
             }
 
             .sidebar-logo {
-                margin-bottom: 30px;
-                padding: 10px;
+                margin-bottom: 28px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+            .sidebar-nav {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 10px;
+            }
+
+            /* Bottom cluster (settings, sign out) hugs the base of the rail. */
+            .sidebar-footer {
+                margin-top: auto;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 10px;
+                padding-top: 20px;
             }
 
             .sidebar-item {
-                width: 100%;
+                width: 42px;
+                height: 42px;
                 display: flex;
+                align-items: center;
                 justify-content: center;
-                padding: 12px 0;
-                color: #6B7280;
+                border-radius: 13px;
+                border: none;
+                background: transparent;
+                color: #9CA3AF;
                 cursor: pointer;
-                border-left: 3px solid transparent;
+                position: relative;
+                transition: background-color 0.15s, color 0.15s;
             }
 
             .sidebar-item.active {
-                color: #2563EB;
-                background-color: #EFF6FF;
-                border-left-color: #2563EB;
+                background-color: #111827;
+                color: #ffffff;
             }
 
             .sidebar-item:hover:not(.active) {
-                background-color: #F9FAFB;
+                background-color: #F3F4F6;
+                color: #374151;
             }
 
             .main-layout {
                 display: flex;
                 flex: 1;
                 overflow: hidden;
+                background-color: var(--bg-main);
+                border-radius: 20px;
+                box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.05);
             }
 
             .panel-list {
@@ -373,42 +406,50 @@
     </head>
     <body>
         <div class="sidebar">
-            <div class="sidebar-logo">
-                <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect width="32" height="32" rx="8" fill="#2563EB"/>
+            <a href="{{ route('home') }}" class="sidebar-logo" title="Classroom">
+                <svg width="30" height="30" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="32" height="32" rx="9" fill="#111827"/>
                     <path d="M16 8L8 14V24H12V18H20V24H24V14L16 8Z" fill="white"/>
                 </svg>
+            </a>
+
+            <div class="sidebar-nav">
+                <a href="{{ route('home') }}" class="sidebar-item {{ request()->routeIs('home') || request()->routeIs('course.*') || request()->routeIs('content.*') ? 'active' : '' }}" title="Dashboard">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                    </svg>
+                </a>
+
+                <a href="{{ route('courses.index') }}" class="sidebar-item {{ request()->routeIs('courses.*') ? 'active' : '' }}" title="Courses">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.232.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                    </svg>
+                </a>
+
+                <a href="{{ route('classes.index') }}" class="sidebar-item {{ request()->routeIs('classes.*') ? 'active' : '' }}" title="Classes">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                    </svg>
+                </a>
+
+                <a href="{{ route('files.index') }}" class="sidebar-item {{ request()->routeIs('files.*') ? 'active' : '' }}" title="Files">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    </svg>
+                </a>
+
             </div>
-            <a href="{{ route('home') }}" class="sidebar-item {{ request()->routeIs('home') ? 'active' : '' }}">
-                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.232.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
-            </a>
 
-            <a href="{{ route('courses.index') }}" class="sidebar-item {{ request()->routeIs('courses.*') ? 'active' : '' }}" title="Courses">
-                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.232.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                </svg>
-            </a>
+            <div class="sidebar-footer">
+                <livewire:notifications />
 
-            <a href="{{ route('classes.index') }}" class="sidebar-item {{ request()->routeIs('classes.*') ? 'active' : '' }}" title="Classes">
-                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-                </svg>
-            </a>
-            
-            <a href="{{ route('files.index') }}" class="sidebar-item {{ request()->routeIs('files.*') ? 'active' : '' }}" title="Files">
-                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                </svg>
-            </a>
+                <button type="button" class="sidebar-item" title="Sign out" onclick="document.getElementById('logout-form').submit();">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h6a2 2 0 012 2v1" />
+                    </svg>
+                </button>
+            </div>
 
-          
-
-
-            <a href="#" class="sidebar-item" title="Logout" onclick="event.preventDefault(); document.getElementById('logout-form').submit();">
-                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h6a2 2 0 012 2v1" />
-                </svg>
-            </a>
             <form id="logout-form" action="{{ route('logout') }}" method="POST" style="display:none;">
                 @csrf
             </form>
