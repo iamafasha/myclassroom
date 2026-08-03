@@ -1,18 +1,79 @@
 <?php 
 use Livewire\Attributes\Layout;
 use Livewire\Volt\Component;
+use Livewire\WithFileUploads;
 
 new #[Layout('layouts.app')] class extends Component
 {
+    use WithFileUploads;
+
     public $moduleContent;
 
     public $scoringPivotId = null;
 
     public array $scoreInputs = [];
 
+    /** Exercise submission state, keyed by content_module_content pivot id. */
+    public array $submissionLinks = [];
+
+    public array $submissionFiles = [];
+
     public function mount($moduleContent)
     {
         $this->moduleContent = \App\Models\ModuleContent::find($moduleContent);
+
+        foreach ($this->moduleContent?->contents ?? [] as $content) {
+            if (!$content->pivot->is_exercise) {
+                continue;
+            }
+
+            $answer = $content->pivot->exerciseAnswerFor(auth()->user());
+            $this->submissionLinks[$content->pivot->id] = $answer->submission_link ?? '';
+        }
+    }
+
+    public function submitExercise($pivotId)
+    {
+        $pivot = \App\Models\ContentModuleContent::where('module_content_id', $this->moduleContent->id)
+            ->whereKey($pivotId)
+            ->firstOrFail();
+
+        $this->validate([
+            "submissionLinks.$pivotId" => 'nullable|url',
+            "submissionFiles.$pivotId" => 'nullable|file|max:51200',
+        ], [
+            "submissionLinks.$pivotId.url" => 'Please enter a valid URL.',
+            "submissionFiles.$pivotId.max" => 'The file must be 50MB or smaller.',
+        ]);
+
+        $link = trim((string) ($this->submissionLinks[$pivotId] ?? ''));
+        $file = $this->submissionFiles[$pivotId] ?? null;
+
+        if ($link === '' && !$file) {
+            $this->addError("submission.$pivotId", 'Please provide an answer link or upload a file before submitting.');
+            return;
+        }
+
+        $answer = \App\Models\ContentExerciseAnswer::firstOrNew([
+            'user_id' => auth()->id(),
+            'content_module_content_id' => $pivot->id,
+        ]);
+
+        if ($link !== '') {
+            $answer->submission_link = $link;
+        }
+
+        if ($file) {
+            $answer->submission_file_path = $file->store('exercise_submissions', 'public');
+        }
+
+        $answer->save();
+
+        $this->moduleContent->is_completed = true;
+        $this->moduleContent->save();
+
+        unset($this->submissionFiles[$pivotId]);
+        $this->moduleContent->load('contents');
     }
 
     public function openScoring($pivotId)
@@ -683,11 +744,15 @@ new #[Layout('layouts.app')] class extends Component
                         </button>
                     </div>
 
-                    @if($errors->has('exercise'))
+                    @php
+                        $pivotId = $singleContent->pivot->id;
+                    @endphp
+
+                    @error("submission.$pivotId")
                         <div style="background-color: #FEE2E2; color: #DC2626; border: 1px solid #FCA5A5; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 0.875rem;">
-                            {{ $errors->first('exercise') }}
+                            {{ $message }}
                         </div>
-                    @endif
+                    @enderror
 
                     @if($exerciseAnswer && ($exerciseAnswer->submission_link || $exerciseAnswer->submission_file_path || $exerciseAnswer->score))
                         <div style="background: white; border: 1px solid #FDE68A; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
@@ -719,23 +784,40 @@ new #[Layout('layouts.app')] class extends Component
                         </div>
                     @endif
 
-                    <form action="{{ route('content.submit-exercise', [$moduleContent->id, $singleContent->id]) }}" method="POST" enctype="multipart/form-data">
-                        @csrf
+                    <form wire:submit="submitExercise({{ $pivotId }})"
+                          x-data="{ progress: 0, uploading: false }"
+                          x-on:livewire-upload-start="uploading = true; progress = 0"
+                          x-on:livewire-upload-finish="uploading = false; progress = 100"
+                          x-on:livewire-upload-cancel="uploading = false"
+                          x-on:livewire-upload-error="uploading = false"
+                          x-on:livewire-upload-progress="progress = $event.detail.progress">
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
                             <div>
                                 <label style="display: block; font-size: 0.875rem; font-weight: 600; color: #78350F; margin-bottom: 6px;">Provide Answer Link</label>
-                                <input type="url" name="submission_link" value="{{ old('submission_link', $exerciseAnswer->submission_link ?? '') }}" style="width: 100%; padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.875rem; outline: none;" placeholder="https://github.com/... or Google Doc URL">
-                                @error('submission_link') <span style="color: #DC2626; font-size: 0.75rem; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
+                                <input type="url" wire:model="submissionLinks.{{ $pivotId }}" style="width: 100%; padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.875rem; outline: none;" placeholder="https://github.com/... or Google Doc URL">
+                                @error("submissionLinks.$pivotId") <span style="color: #DC2626; font-size: 0.75rem; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
                             </div>
                             <div>
                                 <label style="display: block; font-size: 0.875rem; font-weight: 600; color: #78350F; margin-bottom: 6px;">Or Upload Answer File</label>
-                                <input type="file" name="submission_file" style="width: 100%; padding: 6px 12px; background: white; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.875rem;">
-                                @error('submission_file') <span style="color: #DC2626; font-size: 0.75rem; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
+                                <input type="file" wire:model="submissionFiles.{{ $pivotId }}" style="width: 100%; padding: 6px 12px; background: white; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.875rem;">
+                                @error("submissionFiles.$pivotId") <span style="color: #DC2626; font-size: 0.75rem; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
+                                @if(isset($submissionFiles[$pivotId]) && $submissionFiles[$pivotId])
+                                    <span style="font-size: 0.75rem; color: #065F46; display: block; margin-top: 4px;">
+                                        Ready: {{ $submissionFiles[$pivotId]->getClientOriginalName() }}
+                                    </span>
+                                @endif
+                            </div>
+                        </div>
+
+                        <div x-show="uploading" style="display: none; margin-bottom: 16px;">
+                            <div style="font-size: 0.75rem; color: #78350F; margin-bottom: 4px;">Uploading… <span x-text="progress + '%'"></span></div>
+                            <div style="width: 100%; background: #FDE68A; border-radius: 4px;">
+                                <div :style="`width: ${progress}%`" style="height: 8px; background: #D97706; border-radius: 4px; transition: width 0.2s;"></div>
                             </div>
                         </div>
 
                         <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: 16px;">
-                            <button type="submit" style="background-color: #D97706; color: white; border: none; padding: 10px 24px; border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 2px 4px rgba(217, 119, 6, 0.2);">
+                            <button type="submit" x-bind:disabled="uploading" wire:loading.attr="disabled" wire:target="submitExercise" style="background-color: #D97706; color: white; border: none; padding: 10px 24px; border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 2px 4px rgba(217, 119, 6, 0.2);">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                                 </svg>
