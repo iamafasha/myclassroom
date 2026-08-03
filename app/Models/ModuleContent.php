@@ -17,7 +17,7 @@ class ModuleContent extends Model
     {
         return $this->belongsToMany(Content::class, 'content_module_content')
             ->using(ContentModuleContent::class)
-            ->withPivot('sort_order', 'is_exercise', 'submission_link', 'submission_file_path', 'score')
+            ->withPivot('id', 'sort_order', 'is_exercise')
             ->withTimestamps()
             ->orderByPivot('sort_order')
             ->orderByPivot('id');

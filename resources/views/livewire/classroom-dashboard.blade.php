@@ -407,9 +407,12 @@ new #[Layout('layouts.app')] class extends Component
                             @endif
 
                             @foreach($exerciseContents as $exerciseContent)
-                                @if($exerciseContent->pivot->score)
+                                @php
+                                    $exerciseAnswer = $exerciseContent->pivot->exerciseAnswerFor(auth()->user());
+                                @endphp
+                                @if($exerciseAnswer && $exerciseAnswer->score)
                                     <span style="font-size: 0.75rem; color: #92400E; background: #FDE68A; border: 1px solid #F59E0B; padding: 2px 8px; border-radius: 9999px; font-weight: 700; display: inline-flex; align-items: center;">
-                                        Score: {{ $exerciseContent->pivot->score }}
+                                        Score: {{ $exerciseAnswer->score }}
                                     </span>
                                 @endif
                             @endforeach

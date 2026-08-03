@@ -29,10 +29,9 @@ Route::middleware('auth')->group(function () {
             'submission_file' => 'nullable|file|max:51200',
             'obtained_score' => 'nullable|numeric',
             'total_score' => 'nullable|numeric',
-            'score' => 'nullable|string|max:50',
         ]);
 
-        if (!$request->submission_link && !$request->hasFile('submission_file') && !$request->score && !$request->obtained_score) {
+        if (!$request->submission_link && !$request->hasFile('submission_file') && !$request->filled('obtained_score')) {
             return back()->withErrors(['exercise' => 'Please provide an answer link, upload a file, or enter a score before submitting.']);
         }
 
@@ -40,24 +39,27 @@ Route::middleware('auth')->group(function () {
             ->where('content_id', $content->id)
             ->firstOrFail();
 
+        $answer = App\Models\ContentExerciseAnswer::firstOrNew([
+            'user_id' => $request->user()->id,
+            'content_module_content_id' => $pivot->id,
+        ]);
+
         if ($request->submission_link) {
-            $pivot->submission_link = $request->submission_link;
+            $answer->submission_link = $request->submission_link;
         }
 
         if ($request->hasFile('submission_file')) {
             $path = $request->file('submission_file')->store('exercise_submissions', 'public');
-            $pivot->submission_file_path = $path;
+            $answer->submission_file_path = $path;
         }
 
         if ($request->filled('obtained_score') && $request->filled('total_score')) {
-            $pivot->score = $request->obtained_score . '/' . $request->total_score;
+            $answer->score = $request->obtained_score . '/' . $request->total_score;
         } elseif ($request->filled('obtained_score')) {
-            $pivot->score = $request->obtained_score;
-        } elseif ($request->has('score')) {
-            $pivot->score = $request->score;
+            $answer->score = $request->obtained_score;
         }
 
-        $pivot->save();
+        $answer->save();
 
         $moduleContent->is_completed = true;
         $moduleContent->save();

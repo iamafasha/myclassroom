@@ -555,6 +555,9 @@ new #[Layout('layouts.app')] class extends Component
             @endif
 
             @if($singleContent->pivot->is_exercise)
+                @php
+                    $exerciseAnswer = $singleContent->pivot->exerciseAnswerFor(auth()->user());
+                @endphp
                 <div style="margin-top: 24px; padding: 24px; border: 1px solid #FCD34D; background: #FFFBEB; border-radius: 12px;">
                     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
                         <span style="font-size: 1.25rem;">📝</span>
@@ -567,30 +570,30 @@ new #[Layout('layouts.app')] class extends Component
                         </div>
                     @endif
 
-                    @if($singleContent->pivot->submission_link || $singleContent->pivot->submission_file_path || $singleContent->pivot->score)
+                    @if($exerciseAnswer && ($exerciseAnswer->submission_link || $exerciseAnswer->submission_file_path || $exerciseAnswer->score))
                         <div style="background: white; border: 1px solid #FDE68A; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
                             <h4 style="font-size: 0.9rem; font-weight: 600; color: #78350F; margin-top: 0; margin-bottom: 8px;">Your Submitted Exercise Details:</h4>
-                            @if($singleContent->pivot->submission_link)
+                            @if($exerciseAnswer->submission_link)
                                 <div style="margin-bottom: 6px; font-size: 0.9rem;">
                                     <strong>Answer Link:</strong>
-                                    <a href="{{ $singleContent->pivot->submission_link }}" target="_blank" rel="noopener noreferrer" style="color: #2563EB; text-decoration: underline;">
-                                        {{ $singleContent->pivot->submission_link }}
+                                    <a href="{{ $exerciseAnswer->submission_link }}" target="_blank" rel="noopener noreferrer" style="color: #2563EB; text-decoration: underline;">
+                                        {{ $exerciseAnswer->submission_link }}
                                     </a>
                                 </div>
                             @endif
-                            @if($singleContent->pivot->submission_file_path)
+                            @if($exerciseAnswer->submission_file_path)
                                 <div style="margin-bottom: 6px; font-size: 0.9rem;">
                                     <strong>Submitted File:</strong>
-                                    <a href="{{ asset('storage/' . $singleContent->pivot->submission_file_path) }}" target="_blank" style="color: #2563EB; text-decoration: underline;">
+                                    <a href="{{ asset('storage/' . $exerciseAnswer->submission_file_path) }}" target="_blank" style="color: #2563EB; text-decoration: underline;">
                                         Download File
                                     </a>
                                 </div>
                             @endif
-                            @if($singleContent->pivot->score)
+                            @if($exerciseAnswer->score)
                                 <div style="font-size: 0.9rem;">
                                     <strong>Score:</strong>
                                     <span style="font-weight: 700; color: #D97706; background: #FEF3C7; border: 1px solid #FCD34D; padding: 2px 10px; border-radius: 6px;">
-                                        {{ $singleContent->pivot->score }}
+                                        {{ $exerciseAnswer->score }}
                                     </span>
                                 </div>
                             @endif
@@ -600,14 +603,14 @@ new #[Layout('layouts.app')] class extends Component
                     <form action="{{ route('content.submit-exercise', [$moduleContent->id, $singleContent->id]) }}" method="POST" enctype="multipart/form-data">
                         @csrf
                         @php
-                            $scoreParts = explode('/', $singleContent->pivot->score ?? '');
+                            $scoreParts = explode('/', $exerciseAnswer->score ?? '');
                             $obtained = $scoreParts[0] ?? '';
                             $total = isset($scoreParts[1]) ? $scoreParts[1] : '';
                         @endphp
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
                             <div>
                                 <label style="display: block; font-size: 0.875rem; font-weight: 600; color: #78350F; margin-bottom: 6px;">Provide Answer Link</label>
-                                <input type="url" name="submission_link" value="{{ old('submission_link', $singleContent->pivot->submission_link) }}" style="width: 100%; padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.875rem; outline: none;" placeholder="https://github.com/... or Google Doc URL">
+                                <input type="url" name="submission_link" value="{{ old('submission_link', $exerciseAnswer->submission_link ?? '') }}" style="width: 100%; padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.875rem; outline: none;" placeholder="https://github.com/... or Google Doc URL">
                                 @error('submission_link') <span style="color: #DC2626; font-size: 0.75rem; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
                             </div>
                             <div>
@@ -631,7 +634,7 @@ new #[Layout('layouts.app')] class extends Component
                                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                                 </svg>
-                                {{ ($singleContent->pivot->submission_link || $singleContent->pivot->submission_file_path || $singleContent->pivot->score) ? 'Update Submission' : 'Submit Answer' }}
+                                {{ ($exerciseAnswer && ($exerciseAnswer->submission_link || $exerciseAnswer->submission_file_path || $exerciseAnswer->score)) ? 'Update Submission' : 'Submit Answer' }}
                             </button>
                         </div>
                     </form>
