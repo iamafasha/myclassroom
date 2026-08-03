@@ -14,6 +14,9 @@ new #[Layout('layouts.app')] class extends Component
     public $showCreateCourseModal = false;
     public $newCourseTitle = '';
 
+    public $showEditCourseModal = false;
+    public $editCourseTitle = '';
+
     public $showCreateModuleModal = false;
     public $newModuleTitle = '';
 
@@ -78,6 +81,29 @@ new #[Layout('layouts.app')] class extends Component
         ]);
 
         return redirect()->route('course.show', $course->id);
+    }
+
+    public function editCourse()
+    {
+        $this->authorizeManage();
+
+        $this->resetValidation('editCourseTitle');
+        $this->editCourseTitle = $this->currentCourse->title;
+        $this->showEditCourseModal = true;
+    }
+
+    public function updateCourse()
+    {
+        $this->authorizeManage();
+
+        $this->validate([
+            'editCourseTitle' => 'required|string|max:255',
+        ]);
+
+        $this->currentCourse->update(['title' => $this->editCourseTitle]);
+
+        $this->reset('showEditCourseModal', 'editCourseTitle');
+        unset($this->courses, $this->currentCourse);
     }
 
     public function createModule()
@@ -374,6 +400,14 @@ new #[Layout('layouts.app')] class extends Component
                 @endif
             </div>
 
+            @if($this->currentCourse && $this->canManageCourse)
+                <button type="button" wire:click="editCourse" title="Edit Course" style="background: #F3F4F6; border: 1px solid #E5E7EB; border-radius: 6px; padding: 8px; cursor: pointer; color: #4B5563; display: flex; align-items: center; justify-content: center;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                </button>
+            @endif
+
         </div>
 
         <div class="module-list" style="padding-bottom: 50px;">
@@ -586,6 +620,26 @@ new #[Layout('layouts.app')] class extends Component
             <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem;">
                 <button wire:click="$set('showCreateCourseModal', false)" style="padding: 0.5rem 1rem; border: 1px solid #D1D5DB; border-radius: 0.375rem; background-color: white; font-size: 0.875rem; font-weight: 500; color: #374151; cursor: pointer;">Cancel</button>
                 <button wire:click="createCourse" style="padding: 0.5rem 1rem; border: none; border-radius: 0.375rem; background-color: #4F46E5; color: white; font-size: 0.875rem; font-weight: 500; cursor: pointer;">Create Course</button>
+            </div>
+        </div>
+    </div>
+    @endif
+
+    <!-- Edit Course Modal -->
+    @if($showEditCourseModal)
+    <div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(0, 0, 0, 0.5); z-index: 50; display: flex; align-items: center; justify-content: center;">
+        <div style="background-color: white; border-radius: 0.5rem; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); padding: 1.5rem; width: 100%; max-width: 28rem;">
+            <h2 style="font-size: 1.25rem; font-weight: 600; margin-bottom: 1rem; color: #111827;">Edit Course</h2>
+
+            <div style="margin-bottom: 1rem;">
+                <label style="display: block; font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 0.25rem;">Course Title</label>
+                <input type="text" wire:model="editCourseTitle" wire:keydown.enter="updateCourse" placeholder="Enter course title" style="width: 100%; border: 1px solid #D1D5DB; border-radius: 0.375rem; padding: 0.5rem 0.75rem; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); outline: none;">
+                @error('editCourseTitle') <span style="color: #EF4444; font-size: 0.75rem; margin-top: 0.25rem; display: block;">{{ $message }}</span> @enderror
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem;">
+                <button wire:click="$set('showEditCourseModal', false)" style="padding: 0.5rem 1rem; border: 1px solid #D1D5DB; border-radius: 0.375rem; background-color: white; font-size: 0.875rem; font-weight: 500; color: #374151; cursor: pointer;">Cancel</button>
+                <button wire:click="updateCourse" style="padding: 0.5rem 1rem; border: none; border-radius: 0.375rem; background-color: #4F46E5; color: white; font-size: 0.875rem; font-weight: 500; cursor: pointer;">Save Changes</button>
             </div>
         </div>
     </div>

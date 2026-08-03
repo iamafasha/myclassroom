@@ -19,6 +19,10 @@ new #[Layout('layouts.app')] class extends Component {
     #[Validate('required|string|max:255|unique:courses,slug')]
     public string $slug = '';
 
+    public ?int $editingCourseId = null;
+    public string $editTitle = '';
+    public string $editSlug = '';
+
     public function updatedTitle($value)
     {
         $this->slug = \Illuminate\Support\Str::slug($value);
@@ -51,6 +55,34 @@ new #[Layout('layouts.app')] class extends Component {
 
         $this->reset(['title', 'slug', 'showCreateForm']);
         session()->flash('success', 'Course created successfully.');
+    }
+
+    public function editCourse($courseId)
+    {
+        $course = Course::managedBy(auth()->user())->findOrFail($courseId);
+
+        $this->resetValidation();
+        $this->editingCourseId = $course->id;
+        $this->editTitle = $course->title;
+        $this->editSlug = $course->slug;
+    }
+
+    public function updateCourse()
+    {
+        $course = Course::managedBy(auth()->user())->findOrFail($this->editingCourseId);
+
+        $this->validate([
+            'editTitle' => 'required|string|max:255',
+            'editSlug'  => 'required|string|max:255|unique:courses,slug,' . $course->id,
+        ]);
+
+        $course->update([
+            'title' => $this->editTitle,
+            'slug'  => $this->editSlug,
+        ]);
+
+        $this->reset(['editingCourseId', 'editTitle', 'editSlug']);
+        session()->flash('success', 'Course updated successfully.');
     }
 
     public function deleteCourse($courseId)
@@ -123,6 +155,51 @@ new #[Layout('layouts.app')] class extends Component {
     </div>
     @endif
 
+    <!-- Edit form modal overlay -->
+    @if($editingCourseId)
+    <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 50; display: flex; align-items: center; justify-content: center;" wire:click.self="$set('editingCourseId', null)">
+        <div style="background: white; border-radius: 16px; padding: 36px; width: 100%; max-width: 480px; box-shadow: 0 20px 60px rgba(0,0,0,0.2);" wire:click.stop>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                <h2 style="margin: 0; font-size: 20px; font-weight: 700; color: #111827;">Edit Course</h2>
+                <button wire:click="$set('editingCourseId', null)" style="background: none; border: none; cursor: pointer; color: #6B7280; padding: 4px;">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+
+            <form wire:submit="updateCourse" style="display: flex; flex-direction: column; gap: 18px;">
+                <div>
+                    <label style="display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px;">Course Title</label>
+                    <input wire:model="editTitle" type="text" placeholder="e.g. Introduction to Web Development"
+                           style="width: 100%; padding: 11px 14px; border: 1px solid #D1D5DB; border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.2s; box-sizing: border-box;"
+                           onfocus="this.style.borderColor='#2563EB'" onblur="this.style.borderColor='#D1D5DB'">
+                    @error('editTitle') <span style="color: #EF4444; font-size: 12px; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
+                </div>
+
+                <div>
+                    <label style="display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px;">Slug</label>
+                    <input wire:model="editSlug" type="text"
+                           style="width: 100%; padding: 11px 14px; border: 1px solid #D1D5DB; border-radius: 8px; font-size: 14px; outline: none; color: #6B7280; box-sizing: border-box;"
+                           onfocus="this.style.borderColor='#2563EB'" onblur="this.style.borderColor='#D1D5DB'">
+                    @error('editSlug') <span style="color: #EF4444; font-size: 12px; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
+                </div>
+
+                <div style="display: flex; gap: 12px; margin-top: 6px;">
+                    <button type="button" wire:click="$set('editingCourseId', null)"
+                            style="flex: 1; padding: 11px; border: 1px solid #D1D5DB; border-radius: 8px; background: white; font-size: 14px; font-weight: 600; color: #374151; cursor: pointer;">
+                        Cancel
+                    </button>
+                    <button type="submit"
+                            style="flex: 1; padding: 11px; border: none; border-radius: 8px; background: #2563EB; font-size: 14px; font-weight: 600; color: white; cursor: pointer;">
+                        Save Changes
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    @endif
+
     <div style="padding: 30px 40px;">
 
         @if (session('success'))
@@ -154,13 +231,22 @@ new #[Layout('layouts.app')] class extends Component {
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.232.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
                                 </svg>
                             </div>
-                            <button wire:click="deleteCourse({{ $course->id }})" wire:confirm="Delete this course? This cannot be undone."
-                                    style="background: none; border: none; cursor: pointer; color: #9CA3AF; padding: 4px; transition: color 0.2s;"
-                                    onmouseover="this.style.color='#EF4444'" onmouseout="this.style.color='#9CA3AF'">
-                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                                </svg>
-                            </button>
+                            <div style="display: flex; align-items: center; gap: 4px;">
+                                <button wire:click="editCourse({{ $course->id }})" title="Edit course"
+                                        style="background: none; border: none; cursor: pointer; color: #9CA3AF; padding: 4px; transition: color 0.2s;"
+                                        onmouseover="this.style.color='#2563EB'" onmouseout="this.style.color='#9CA3AF'">
+                                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                                    </svg>
+                                </button>
+                                <button wire:click="deleteCourse({{ $course->id }})" wire:confirm="Delete this course? This cannot be undone."
+                                        style="background: none; border: none; cursor: pointer; color: #9CA3AF; padding: 4px; transition: color 0.2s;"
+                                        onmouseover="this.style.color='#EF4444'" onmouseout="this.style.color='#9CA3AF'">
+                                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
 
                         <div>
