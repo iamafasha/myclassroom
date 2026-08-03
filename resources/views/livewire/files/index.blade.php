@@ -31,6 +31,7 @@ new #[Layout('layouts.app')] class extends Component {
             $originalName = $upload->getClientOriginalName();
 
             File::create([
+                'user_id' => auth()->id(),
                 'name' => $single && trim($this->name) !== '' ? trim($this->name) : $originalName,
                 'file_path' => $upload->store('uploads', 'public'),
                 'file_type' => $this->fileTypeFor($upload->getClientOriginalExtension()),
@@ -47,7 +48,7 @@ new #[Layout('layouts.app')] class extends Component {
 
     public function delete($fileId)
     {
-        $file = File::findOrFail($fileId);
+        $file = File::ownedBy(auth()->user())->findOrFail($fileId);
 
         if (Storage::disk('public')->exists($file->file_path)) {
             Storage::disk('public')->delete($file->file_path);
@@ -62,7 +63,7 @@ new #[Layout('layouts.app')] class extends Component {
     #[Computed]
     public function files()
     {
-        return File::latest()->get();
+        return File::ownedBy(auth()->user())->latest()->get();
     }
 
     private function fileTypeFor($extension)
@@ -174,7 +175,7 @@ new #[Layout('layouts.app')] class extends Component {
                     </div>
                 @empty
                     <div class="content-card" style="justify-content: center; padding: 40px; color: #6B7280;">
-                        No files uploaded yet.
+                        You have not uploaded any files yet.
                     </div>
                 @endforelse
             </div>

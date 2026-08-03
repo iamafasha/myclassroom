@@ -61,13 +61,20 @@ new #[Layout('layouts.app')] class extends Component
     public function mount($moduleContentId, $contentId = null)
     {
         $moduleContent = ModuleContent::findOrFail($moduleContentId);
+
+        abort_unless(
+            (bool) $moduleContent->module?->course?->isManagedBy(auth()->user()),
+            403,
+            'Only the course owner can add or edit content.'
+        );
+
         $this->moduleContentId = $moduleContentId;
         $this->moduleId = $moduleContent->module_id;
         $this->courseId = $moduleContent->module->course_id;
         $this->label = $moduleContent->label ?? '';
-        $this->pdfFiles = File::where('file_type', 'pdf')->get();
-        $this->videoFiles = File::whereIn('file_type', ['video', 'mp4', 'mov', 'avi'])->get();
-        $this->imageFiles = File::whereIn('file_type', ['image', 'png', 'jpg', 'jpeg'])->get();
+        $this->pdfFiles = File::ownedBy(auth()->user())->where('file_type', 'pdf')->get();
+        $this->videoFiles = File::ownedBy(auth()->user())->whereIn('file_type', ['video', 'mp4', 'mov', 'avi'])->get();
+        $this->imageFiles = File::ownedBy(auth()->user())->whereIn('file_type', ['image', 'png', 'jpg', 'jpeg'])->get();
 
         if ($contentId) {
             $content = Content::findOrFail($contentId);
@@ -94,7 +101,9 @@ new #[Layout('layouts.app')] class extends Component
             if (!str_starts_with($fileUrl, $storagePrefix)) {
                 return null;
             }
-            return File::where('file_path', substr($fileUrl, strlen($storagePrefix)))->first();
+            return File::ownedBy(auth()->user())
+                ->where('file_path', substr($fileUrl, strlen($storagePrefix)))
+                ->first();
         };
 
         if ($contentable instanceof NoteContent) {
@@ -142,6 +151,12 @@ new #[Layout('layouts.app')] class extends Component
         }
     }
 
+    /** A picked file must be one the current user uploaded. */
+    private function ownedFileRule()
+    {
+        return \Illuminate\Validation\Rule::exists('files', 'id')->where('user_id', auth()->id());
+    }
+
     public function pdfPreviewUrl()
     {
         if ($this->pdfSourceType === 'upload' && $this->pdfUpload) {
@@ -149,7 +164,7 @@ new #[Layout('layouts.app')] class extends Component
         }
 
         if ($this->pdfSourceType === 'existing' && $this->pdfFileId) {
-            $file = File::find($this->pdfFileId);
+            $file = File::ownedBy(auth()->user())->find($this->pdfFileId);
             return $file ? asset('storage/' . $file->file_path) : null;
         }
 
@@ -252,18 +267,19 @@ new #[Layout('layouts.app')] class extends Component
                 ]);
 
                 $file = File::create([
+                    'user_id' => auth()->id(),
                     'name' => $this->pdfUpload->getClientOriginalName(),
                     'file_path' => $this->pdfUpload->store('uploads', 'public'),
                     'file_type' => 'pdf',
                 ]);
             } else {
                 $this->validate([
-                    'pdfFileId' => 'required|exists:files,id',
+                    'pdfFileId' => ['required', $this->ownedFileRule()],
                     'pdfStartPage' => 'nullable|string',
                     'pdfEndPage' => 'nullable|string',
                 ]);
 
-                $file = File::find($this->pdfFileId);
+                $file = File::ownedBy(auth()->user())->find($this->pdfFileId);
             }
 
             $this->validate([
@@ -289,12 +305,12 @@ new #[Layout('layouts.app')] class extends Component
             
             if ($this->videoSourceType === 'file') {
                 $this->validate([
-                    'videoFileId' => 'required|exists:files,id',
+                    'videoFileId' => ['required', $this->ownedFileRule()],
                     'videoStartTime' => 'nullable|string',
                     'videoEndTime' => 'nullable|string',
                 ]);
 
-                $file = File::find($this->videoFileId);
+                $file = File::ownedBy(auth()->user())->find($this->videoFileId);
                 $fileUrl = asset('storage/' . $file->file_path);
                 $startTime = $this->videoStartTime;
                 $endTime = $this->videoEndTime;
@@ -365,11 +381,11 @@ new #[Layout('layouts.app')] class extends Component
 
                 $this->validate([
                     'imageSourceType' => 'required|in:file,url',
-                    'imageFileId' => 'required_if:imageSourceType,file|exists:files,id',
+                    'imageFileId' => ['required_if:imageSourceType,file', $this->ownedFileRule()],
                     'imageExternalUrl' => 'required_if:imageSourceType,url',
                 ]);
 
-                $file = File::find($this->imageFileId);
+                $file = File::ownedBy(auth()->user())->find($this->imageFileId);
 
                 $contentable = $existingContentable ?: new ImageContent();
                 $contentable->name = $this->label;

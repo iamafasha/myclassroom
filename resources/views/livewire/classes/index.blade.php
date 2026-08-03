@@ -5,26 +5,19 @@ use Livewire\Attributes\Layout;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Validate;
 use App\Models\Classroom;
-use App\Models\User;
 
 new #[Layout('layouts.app')] class extends Component {
     
     #[Validate('required|string|max:255')]
     public string $title = '';
 
-    #[Validate('required|exists:users,id')]
-    public ?int $admin_id = null;
-
-    #[Computed]
-    public function users()
-    {
-        return User::orderBy('name')->get();
-    }
-
     #[Computed]
     public function classrooms()
     {
-        return Classroom::with('admin')->latest()->get();
+        return Classroom::with('admin')
+            ->where('admin_id', auth()->id())
+            ->latest()
+            ->get();
     }
 
     public function createClassroom()
@@ -33,10 +26,10 @@ new #[Layout('layouts.app')] class extends Component {
 
         Classroom::create([
             'title' => $this->title,
-            'admin_id' => $this->admin_id,
+            'admin_id' => auth()->id(),
         ]);
 
-        $this->reset(['title', 'admin_id']);
+        $this->reset(['title']);
         session()->flash('success', 'Classroom created successfully.');
     }
 }; ?>
@@ -46,7 +39,7 @@ new #[Layout('layouts.app')] class extends Component {
     <div class="panel-list" style="width: 350px; padding: 40px 20px; overflow-y: auto; background-color: #F9FAFB; border-right: 1px solid #E5E7EB; flex-shrink: 0;">
         <div class="content-header" style="margin-bottom: 30px;">
             <h1 class="content-title" style="font-size: 20px;">Classes Management</h1>
-            <p style="color: var(--text-secondary); font-size: 13px; margin-top: 5px;">Create and manage classrooms.</p>
+            <p style="color: var(--text-secondary); font-size: 13px; margin-top: 5px;">Create and manage the classrooms you administer.</p>
         </div>
 
         @if (session('success'))
@@ -66,16 +59,9 @@ new #[Layout('layouts.app')] class extends Component {
                     @error('title') <span style="color: #EF4444; font-size: 11px; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
                 </div>
 
-                <div>
-                    <label style="display: block; font-size: 12px; font-weight: 600; color: #4B5563; margin-bottom: 5px;">Assign Admin</label>
-                    <select wire:model="admin_id" class="select-styled" style="width: 100%;">
-                        <option value="">Select an admin...</option>
-                        @foreach($this->users as $user)
-                            <option value="{{ $user->id }}">{{ $user->name }} ({{ $user->email }})</option>
-                        @endforeach
-                    </select>
-                    @error('admin_id') <span style="color: #EF4444; font-size: 11px; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
-                </div>
+                <p style="margin: 0; font-size: 12px; color: #6B7280;">
+                    You will be the admin of this class.
+                </p>
 
                 <button type="submit" class="btn-solve" style="justify-content: center; width: 100%; margin-top: 10px; padding: 12px; background-color: #2563EB;">
                     <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin-right: 4px;">
@@ -89,14 +75,14 @@ new #[Layout('layouts.app')] class extends Component {
 
     <!-- List Panel -->
     <div style="flex: 1; padding: 40px; overflow-y: auto; background-color: #ffffff;">
-        <h2 style="font-size: 18px; font-weight: 700; color: #111827; margin-top: 0; margin-bottom: 20px;">Existing Classes ({{ $this->classrooms->count() }})</h2>
+        <h2 style="font-size: 18px; font-weight: 700; color: #111827; margin-top: 0; margin-bottom: 20px;">Your Classes ({{ $this->classrooms->count() }})</h2>
         
         @if($this->classrooms->isEmpty())
             <div style="text-align: center; padding: 60px 20px; background: #F9FAFB; border-radius: 12px; border: 1px dashed #D1D5DB;">
                 <svg width="40" height="40" fill="none" stroke="#9CA3AF" viewBox="0 0 24 24" style="margin: 0 auto 10px;">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
                 </svg>
-                <h3 style="font-size: 14px; font-weight: 600; color: #4B5563; margin-bottom: 5px;">No Classes Found</h3>
+                <h3 style="font-size: 14px; font-weight: 600; color: #4B5563; margin-bottom: 5px;">No Classes Yet</h3>
                 <p style="font-size: 13px; color: #6B7280; margin: 0;">Use the form on the left to create your first class.</p>
             </div>
         @else

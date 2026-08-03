@@ -49,6 +49,18 @@ new #[Layout('layouts.app')] class extends Component
         $this->selectedModuleId = $moduleId;
     }
 
+    #[Computed]
+    public function canManageCourse()
+    {
+        return (bool) $this->currentCourse?->isManagedBy(auth()->user());
+    }
+
+    /** Structural edits (modules, contents, ordering) belong to the course owner. */
+    private function authorizeManage()
+    {
+        abort_unless($this->canManageCourse, 403, 'Only the course owner can change this course.');
+    }
+
     public function createCourse()
     {
         $this->validate([
@@ -66,6 +78,8 @@ new #[Layout('layouts.app')] class extends Component
 
     public function createModule()
     {
+        $this->authorizeManage();
+
         $this->validate([
             'newModuleTitle' => 'required|string|max:255',
         ]);
@@ -97,6 +111,8 @@ new #[Layout('layouts.app')] class extends Component
 
     public function deleteContent($contentId)
     {
+        $this->authorizeManage();
+
         $moduleContent = \App\Models\ModuleContent::find($contentId);
         if ($moduleContent) {
             foreach ($moduleContent->contents as $content) {
@@ -112,6 +128,8 @@ new #[Layout('layouts.app')] class extends Component
 
     public function addContent()
     {
+        $this->authorizeManage();
+
         if (!$this->selectedModuleId) {
             return;
         }
@@ -128,6 +146,8 @@ new #[Layout('layouts.app')] class extends Component
 
     public function deleteModule($moduleId)
     {
+        $this->authorizeManage();
+
         $module = Module::find($moduleId);
         if ($module) {
             foreach ($module->moduleContents as $mc) {
@@ -141,7 +161,7 @@ new #[Layout('layouts.app')] class extends Component
 
     public function deleteCourse($courseId)
     {
-        $course = Course::find($courseId);
+        $course = Course::managedBy(auth()->user())->find($courseId);
         if ($course) {
             foreach ($course->modules as $mod) {
                 $this->deleteModule($mod->id);
@@ -154,6 +174,8 @@ new #[Layout('layouts.app')] class extends Component
 
     public function moveModuleUp($moduleId)
     {
+        $this->authorizeManage();
+
         $modules = Module::where('course_id', $this->selectedCourseId)->orderBy('sort_order', 'asc')->orderBy('id', 'asc')->get();
         foreach ($modules as $i => $m) {
             $m->update(['sort_order' => $i]);
@@ -172,6 +194,8 @@ new #[Layout('layouts.app')] class extends Component
 
     public function moveModuleDown($moduleId)
     {
+        $this->authorizeManage();
+
         $modules = Module::where('course_id', $this->selectedCourseId)->orderBy('sort_order', 'asc')->orderBy('id', 'asc')->get();
         foreach ($modules as $i => $m) {
             $m->update(['sort_order' => $i]);
@@ -190,6 +214,8 @@ new #[Layout('layouts.app')] class extends Component
 
     public function moveContentUp($contentId)
     {
+        $this->authorizeManage();
+
         if (!$this->selectedModuleId) return;
         $contents = \App\Models\ModuleContent::where('module_id', $this->selectedModuleId)->orderBy('sort_order', 'asc')->orderBy('id', 'asc')->get();
         foreach ($contents as $i => $c) {
@@ -209,6 +235,8 @@ new #[Layout('layouts.app')] class extends Component
 
     public function moveContentDown($contentId)
     {
+        $this->authorizeManage();
+
         if (!$this->selectedModuleId) return;
         $contents = \App\Models\ModuleContent::where('module_id', $this->selectedModuleId)->orderBy('sort_order', 'asc')->orderBy('id', 'asc')->get();
         foreach ($contents as $i => $c) {
@@ -228,6 +256,8 @@ new #[Layout('layouts.app')] class extends Component
 
     public function moveContentToModule($contentId, $targetModuleId)
     {
+        $this->authorizeManage();
+
         $moduleContent = \App\Models\ModuleContent::find($contentId);
         $targetModule = Module::find($targetModuleId);
 
@@ -312,11 +342,13 @@ new #[Layout('layouts.app')] class extends Component
             @foreach($this->modules as $module)
                 <a  href="{{ route('course.module.show', ['courseId' => $this->selectedCourseId, 'moduleId' => $module->id]) }}" wire:navigate 
                      x-data="{ isOver: false }"
+                     @if($this->canManageCourse)
                      @dragover.prevent="isOver = true"
                      @dragenter.prevent="isOver = true"
                      @dragleave.prevent="isOver = false"
                      @drop.prevent="isOver = false; const cId = event.dataTransfer.getData('contentId'); if(cId) { $wire.moveContentToModule(cId, {{ $module->id }}); }"
                      :style="isOver ? 'border: 2px dashed #4F46E5; background-color: #EEF2FF;' : ''"
+                     @endif
                      class="module-card design group {{ $selectedModuleId == $module->id ? 'active' : '' }}" 
                      style="position: relative; cursor: pointer; user-select: none; transition: all 0.2s;">
                     <div class="module-header">
@@ -325,6 +357,7 @@ new #[Layout('layouts.app')] class extends Component
                     <div class="module-body" style="display: flex; justify-content: space-between; align-items: center;">
                         <div class="module-title">{{ $module->title }}</div>
                         <div style="display: flex; align-items: center; gap: 4px;">
+                            @if($this->canManageCourse)
                             <button type="button" wire:click.stop="moveModuleUp({{ $module->id }})" class="opacity-0 group-hover:opacity-100 transition-opacity" style="background: #F3F4F6; border: none; border-radius: 4px; padding: 4px; cursor: pointer; color: #4B5563; display: flex; align-items: center; justify-content: center;" title="Move Module Up">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
@@ -340,13 +373,14 @@ new #[Layout('layouts.app')] class extends Component
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                                 </svg>
                             </button>
+                            @endif
                         </div>
                     </div>
                 </a>
             @endforeach
 
 
-            @if($selectedCourseId)
+            @if($selectedCourseId && $this->canManageCourse)
             <div class="mt-4 p-2 w-full flex justify-center">
                 <button wire:click="$set('showCreateModuleModal', true)" class="w-full bg-blue-100 text-blue-600 border border-blue-200 rounded p-2 hover:bg-blue-200 transition-colors cursor-pointer" style="font-weight: 500; border: 1px dashed #3b82f6; background: transparent; color: #3b82f6; width: 100%; border-radius: 6px; padding: 8px;">+ Add Module</button>
             </div>
@@ -362,7 +396,7 @@ new #[Layout('layouts.app')] class extends Component
                     <div class="content-breadcrumb">{{ $this->currentCourse->title }}</div>
                     <h1 class="content-title">{{ $this->currentModule ? $this->currentModule->title : 'No topic selected' }}</h1>
                 </div>
-                @if($this->currentModule)
+                @if($this->currentModule && $this->canManageCourse)
                     <button wire:click="addContent" style="background-color: #4F46E5; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; transition: background-color 0.2s;">
                         + Add Content
                     </button>
@@ -376,16 +410,18 @@ new #[Layout('layouts.app')] class extends Component
     
         <div class="contents-list">
             @foreach($this->contents as $moduleContent)
-                <div draggable="true"
-                     @dragstart="event.dataTransfer.setData('contentId', '{{ $moduleContent->id }}'); event.dataTransfer.effectAllowed = 'move';"
+                <div @if($this->canManageCourse) draggable="true"
+                     @dragstart="event.dataTransfer.setData('contentId', '{{ $moduleContent->id }}'); event.dataTransfer.effectAllowed = 'move';" @endif
                      class="content-card group {{ $moduleContent->is_completed ? 'completed' : '' }}" 
-                     style="width:100%; cursor: grab; display: flex; align-items: center; gap: 10px;">
+                     style="width:100%; cursor: {{ $this->canManageCourse ? 'grab' : 'default' }}; display: flex; align-items: center; gap: 10px;">
                     
+                    @if($this->canManageCourse)
                     <div style="cursor: grab; color: #9CA3AF; display: flex; align-items: center; padding-right: 4px;" title="Drag to move to another module">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16" />
                         </svg>
                     </div>
+                    @endif
 
                     <div class="content-info" style="flex: 1;">
                         <div class="content-name" style="{{ $moduleContent->is_completed ? 'text-decoration: line-through; color: #6B7280;' : '' }}">
@@ -436,6 +472,7 @@ new #[Layout('layouts.app')] class extends Component
                         </div>
                     </div>
                     <div class="action-area" style="display: flex; gap: 6px; align-items: center;">
+                            @if($this->canManageCourse)
                             <div class="opacity-0 group-hover:opacity-100 transition-opacity" style="display: flex; gap: 4px;">
                                 <button wire:click.stop="moveContentUp({{ $moduleContent->id }})" style="background: #F3F4F6; color: #4B5563; border: none; padding: 8px; border-radius: 0.375rem; cursor: pointer; display: flex; align-items: center; justify-content: center;" title="Move Content Up">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -453,6 +490,7 @@ new #[Layout('layouts.app')] class extends Component
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                                 </svg>
                             </button>
+                            @endif
                             <a href="{{ route('content.show', $moduleContent->id) }}" class="btn-solve" style="text-decoration: none;">
                                View
                             </a>

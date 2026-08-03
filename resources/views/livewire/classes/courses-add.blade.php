@@ -13,6 +13,8 @@ new #[Layout('layouts.app')] class extends Component {
 
     public function mount(Classroom $classroom)
     {
+        abort_unless($classroom->admin_id === auth()->id(), 403, 'You do not manage this class.');
+
         $this->classroom = $classroom;
     }
 
@@ -21,7 +23,8 @@ new #[Layout('layouts.app')] class extends Component {
     {
         $existingCourseIds = $this->classroom->courses()->pluck('courses.id')->toArray();
 
-        return Course::whereNotIn('id', $existingCourseIds)
+        return Course::managedBy(auth()->user())
+            ->whereNotIn('id', $existingCourseIds)
             ->when($this->search, fn($q) => $q->where('title', 'like', '%' . $this->search . '%'))
             ->orderBy('title')
             ->get();
@@ -35,6 +38,8 @@ new #[Layout('layouts.app')] class extends Component {
 
     public function add($courseId)
     {
+        abort_unless(Course::managedBy(auth()->user())->whereKey($courseId)->exists(), 403, 'You do not own this course.');
+
         $this->classroom->courses()->attach($courseId);
         session()->flash('success', 'Course added to class successfully.');
     }
@@ -57,7 +62,7 @@ new #[Layout('layouts.app')] class extends Component {
             Back to {{ $classroom->title }}
         </a>
         <h1 style="margin: 0; font-size: 24px; font-weight: 800; color: #111827;">Add Courses to Class</h1>
-        <p style="margin: 6px 0 0; font-size: 14px; color: #6B7280;">Browse and add available courses to <strong>{{ $classroom->title }}</strong>.</p>
+        <p style="margin: 6px 0 0; font-size: 14px; color: #6B7280;">Add courses you own to <strong>{{ $classroom->title }}</strong>.</p>
     </div>
 
     @if (session('success'))
@@ -117,7 +122,7 @@ new #[Layout('layouts.app')] class extends Component {
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.232.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
                         </svg>
                         <p style="font-size: 14px; color: #6B7280; margin: 0;">
-                            @if($search) No courses matching "{{ $search }}". @else All courses have been added to this class. @endif
+                            @if($search) None of your courses match "{{ $search }}". @else All of your courses have been added to this class. @endif
                         </p>
                     </div>
                 @endforelse

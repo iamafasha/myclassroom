@@ -17,6 +17,8 @@ new #[Layout('layouts.app')] class extends Component {
 
     public function mount(Classroom $classroom)
     {
+        abort_unless($classroom->admin_id === auth()->id(), 403, 'You do not manage this class.');
+
         $this->classroom = $classroom;
     }
 

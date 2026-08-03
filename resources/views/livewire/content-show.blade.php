@@ -20,9 +20,16 @@ new #[Layout('layouts.app')] class extends Component
 
     public function mount($moduleContent)
     {
-        $this->moduleContent = \App\Models\ModuleContent::find($moduleContent);
+        $this->moduleContent = \App\Models\ModuleContent::findOrFail($moduleContent);
 
-        foreach ($this->moduleContent?->contents ?? [] as $content) {
+        $course = $this->moduleContent->module?->course;
+        abort_unless(
+            $course && \App\Models\Course::visibleTo(auth()->user())->whereKey($course->id)->exists(),
+            403,
+            'This content belongs to a course you do not have access to.'
+        );
+
+        foreach ($this->moduleContent->contents as $content) {
             if (!$content->pivot->is_exercise) {
                 continue;
             }
@@ -78,6 +85,8 @@ new #[Layout('layouts.app')] class extends Component
 
     public function openScoring($pivotId)
     {
+        $this->authorizeManage();
+
         $this->scoringPivotId = $pivotId;
         $this->scoreInputs = [];
 
@@ -98,6 +107,8 @@ new #[Layout('layouts.app')] class extends Component
 
     public function saveScores()
     {
+        $this->authorizeManage();
+
         $pivot = $this->scoringPivot;
 
         if (!$pivot) {
@@ -134,7 +145,8 @@ new #[Layout('layouts.app')] class extends Component
 
     public function getScoringPivotProperty()
     {
-        return $this->scoringPivotId
+        // Public properties can be set from the browser, so re-check ownership here.
+        return $this->scoringPivotId && $this->canManage
             ? \App\Models\ContentModuleContent::find($this->scoringPivotId)
             : null;
     }
@@ -176,13 +188,29 @@ new #[Layout('layouts.app')] class extends Component
         return \App\Models\User::whereIn('id', $ids)->orderBy('name')->get();
     }
 
+    #[\Livewire\Attributes\Computed]
+    public function canManage()
+    {
+        return (bool) $this->moduleContent?->module?->course?->isManagedBy(auth()->user());
+    }
+
+    /** Editing contents, ordering them and reading everyone's submissions is the owner's job. */
+    private function authorizeManage()
+    {
+        abort_unless($this->canManage, 403, 'Only the course owner can manage this content.');
+    }
+
     public function moveContentItemUp($contentId)
     {
+        $this->authorizeManage();
+
         $this->reorderContentItem($contentId, -1);
     }
 
     public function moveContentItemDown($contentId)
     {
+        $this->authorizeManage();
+
         $this->reorderContentItem($contentId, 1);
     }
 
@@ -222,6 +250,7 @@ new #[Layout('layouts.app')] class extends Component
             <h1 class="content-title" style="{{ $moduleContent->is_completed ? 'text-decoration: line-through; color: #6B7280;' : '' }}">{{ $moduleContent->label ?? 'Content' }}</h1>
         </div>
 
+        @if($this->canManage)
         <div x-data="{ open: false }" style="position: relative; display: inline-block;">
             <button @click="open = !open" style="background-color: #4F46E5; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; transition: background-color 0.2s;">
                 + Add Content
@@ -238,6 +267,7 @@ new #[Layout('layouts.app')] class extends Component
                 <a href="/content/{{ $moduleContent->id }}/add?type=quiz" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none;">Interactive Quiz</a>
             </div>
         </div>
+        @endif
     </div>
 
     <div class="content-card" style="margin-top: 20px;  display: block;">
@@ -286,11 +316,13 @@ new #[Layout('layouts.app')] class extends Component
 
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                 <span style="font-size: 0.75rem; font-weight: 700; color: #6B7280; text-transform: uppercase; letter-spacing: 0.05em;">{{ $contentTypeLabels[$type] ?? 'Content' }}</span>
+                @if($this->canManage)
                 <div style="display: flex; align-items: center; gap: 6px;">
                     <button wire:click="moveContentItemUp({{ $singleContent->id }})" @if($loop->first) disabled @endif title="Move up" style="width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; background: white; border: 1px solid #D1D5DB; border-radius: 6px; cursor: {{ $loop->first ? 'not-allowed' : 'pointer' }}; opacity: {{ $loop->first ? '0.4' : '1' }}; color: #374151;">&uarr;</button>
                     <button wire:click="moveContentItemDown({{ $singleContent->id }})" @if($loop->last) disabled @endif title="Move down" style="width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; background: white; border: 1px solid #D1D5DB; border-radius: 6px; cursor: {{ $loop->last ? 'not-allowed' : 'pointer' }}; opacity: {{ $loop->last ? '0.4' : '1' }}; color: #374151;">&darr;</button>
                     <a href="{{ route('content.edit', ['moduleContentId' => $moduleContent->id, 'contentId' => $singleContent->id]) }}" wire:navigate style="margin-left: 4px; padding: 6px 12px; background: white; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.8rem; font-weight: 600; color: #4F46E5; text-decoration: none;">Edit</a>
                 </div>
+                @endif
             </div>
 
             @if($type === 'NoteContent')
@@ -735,6 +767,7 @@ new #[Layout('layouts.app')] class extends Component
                                     $q->whereNotNull('submission_link')->orWhereNotNull('submission_file_path');
                                 })->count();
                         @endphp
+                        @if($this->canManage)
                         <button type="button" wire:click="openScoring({{ $singleContent->pivot->id }})" style="background: white; color: #92400E; border: 1px solid #F59E0B; padding: 8px 14px; border-radius: 8px; font-weight: 600; font-size: 0.85rem; cursor: pointer; display: inline-flex; align-items: center; gap: 8px;">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
@@ -742,6 +775,7 @@ new #[Layout('layouts.app')] class extends Component
                             Submissions &amp; Scoring
                             <span style="background: #FEF3C7; border: 1px solid #FCD34D; border-radius: 9999px; padding: 0 7px; font-size: 0.75rem; font-weight: 700;">{{ $submissionCount }}</span>
                         </button>
+                        @endif
                     </div>
 
                     @php

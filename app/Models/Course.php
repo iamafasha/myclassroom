@@ -24,6 +24,21 @@ class Course extends Model
     }
 
     /**
+     * Only the creator manages a course: modules, contents and submissions.
+     */
+    public function isManagedBy($user): bool
+    {
+        $userId = $user instanceof User ? $user->id : $user;
+
+        return $this->created_by !== null && (int) $this->created_by === (int) $userId;
+    }
+
+    public function scopeManagedBy($query, $user)
+    {
+        return $query->where('created_by', $user instanceof User ? $user->id : $user);
+    }
+
+    /**
      * Courses the user may see: those in a class they attend or administer,
      * plus the ones they created themselves.
      */

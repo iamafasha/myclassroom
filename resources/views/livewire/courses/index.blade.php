@@ -32,7 +32,8 @@ new #[Layout('layouts.app')] class extends Component {
     #[Computed]
     public function courses()
     {
-        return Course::withCount('modules')
+        return Course::managedBy(auth()->user())
+            ->withCount('modules')
             ->when($this->search, fn($q) => $q->where('title', 'like', '%' . $this->search . '%'))
             ->orderBy('title')
             ->paginate(12);
@@ -54,7 +55,7 @@ new #[Layout('layouts.app')] class extends Component {
 
     public function deleteCourse($courseId)
     {
-        Course::findOrFail($courseId)->delete();
+        Course::managedBy(auth()->user())->findOrFail($courseId)->delete();
         session()->flash('success', 'Course deleted.');
     }
 }; ?>
