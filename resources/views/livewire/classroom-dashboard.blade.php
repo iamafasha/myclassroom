@@ -431,11 +431,32 @@ new #[Layout('layouts.app')] class extends Component
                             @php
                                 $firstContent = $moduleContent->contents->first();
                                 $exerciseContents = $moduleContent->contents->filter(fn ($c) => $c->pivot->is_exercise);
+                                $liveClass = $moduleContent->contents
+                                    ->map(fn ($c) => $c->contentable)
+                                    ->first(fn ($c) => $c instanceof \App\Models\LiveClassContent);
                             @endphp
                             @if($firstContent && $firstContent->contentable)
                                 <span class="badge badge-medium">{{ str_replace('Content', '', class_basename($firstContent->contentable_type)) }}</span>
                             @else
                                 <span class="badge badge-medium">Unknown</span>
+                            @endif
+
+                            @if($liveClass)
+                                @php $liveStatus = $liveClass->status(); @endphp
+                                <span title="{{ $liveClass->starts_at->format('D, j M Y H:i') }}"
+                                      style="font-size: 0.75rem; padding: 2px 8px; border-radius: 9999px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px;
+                                             @if($liveStatus === 'live') color: #B91C1C; background: #FEE2E2; border: 1px solid #FCA5A5;
+                                             @elseif($liveStatus === 'ended') color: #4B5563; background: #F3F4F6; border: 1px solid #E5E7EB;
+                                             @else color: #6D28D9; background: #EDE9FE; border: 1px solid #DDD6FE; @endif">
+                                    @if($liveStatus === 'live')
+                                        <span style="width: 7px; height: 7px; border-radius: 9999px; background: #DC2626; display: inline-block;"></span>
+                                        Live now
+                                    @elseif($liveStatus === 'ended')
+                                        Live class ended
+                                    @else
+                                        🔴 Live {{ $liveClass->starts_at->format('j M, H:i') }}
+                                    @endif
+                                </span>
                             @endif
 
                             @if($exerciseContents->isNotEmpty())

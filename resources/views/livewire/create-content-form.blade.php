@@ -8,6 +8,7 @@ use App\Models\VideoContent;
 use App\Models\ImageContent;
 use App\Models\LinkContent;
 use App\Models\QuizContent;
+use App\Models\LiveClassContent;
 use App\Models\File;
 use Livewire\Attributes\Url;
 
@@ -57,6 +58,12 @@ new #[Layout('layouts.app')] class extends Component
 
     public $quizDescription = '';
     public $questions = [];
+
+    public $liveClassLink = '';
+    public $liveClassJoinEnabled = true;
+    public $liveClassStartsAt = '';
+    public $liveClassDuration = 60;
+    public $liveClassDescription = '';
     
     public function mount($moduleContentId, $contentId = null)
     {
@@ -148,6 +155,13 @@ new #[Layout('layouts.app')] class extends Component
             $this->type = 'quiz';
             $this->quizDescription = $contentable->description;
             $this->questions = $contentable->questions ?: [];
+        } elseif ($contentable instanceof LiveClassContent) {
+            $this->type = 'live';
+            $this->liveClassLink = $contentable->join_link ?? '';
+            $this->liveClassJoinEnabled = (bool) $contentable->is_join_enabled;
+            $this->liveClassStartsAt = $contentable->starts_at?->format('Y-m-d\\TH:i') ?? '';
+            $this->liveClassDuration = $contentable->duration_minutes ?: 60;
+            $this->liveClassDescription = $contentable->description ?? '';
         }
     }
 
@@ -409,6 +423,25 @@ new #[Layout('layouts.app')] class extends Component
             $contentable->description = $this->quizDescription;
             $contentable->questions = $this->questions;
             $contentable->save();
+        } elseif ($this->type === 'live') {
+            $this->validate([
+                'liveClassStartsAt' => 'required|date',
+                'liveClassDuration' => 'required|integer|min:5|max:1440',
+                'liveClassLink' => 'nullable|url|max:2048',
+                'liveClassDescription' => 'nullable|string',
+            ], [
+                'liveClassStartsAt.required' => 'Please pick the date and time of the class.',
+                'liveClassLink.url' => 'The class link must be a valid URL (e.g. https://meet.google.com/...).',
+            ]);
+
+            $contentable = $existingContentable ?: new LiveClassContent();
+            $contentable->title = $this->label;
+            $contentable->description = $this->liveClassDescription ?: null;
+            $contentable->join_link = trim($this->liveClassLink) ?: null;
+            $contentable->is_join_enabled = (bool) $this->liveClassJoinEnabled;
+            $contentable->starts_at = \Illuminate\Support\Carbon::parse($this->liveClassStartsAt);
+            $contentable->duration_minutes = (int) $this->liveClassDuration ?: 60;
+            $contentable->save();
         }
 
         if ($this->isEditing) {
@@ -471,6 +504,7 @@ new #[Layout('layouts.app')] class extends Component
             <option value="image">Image Content</option>
             <option value="link">External Link</option>
             <option value="quiz">Interactive Quiz</option>
+            <option value="live">Live Class</option>
         </select>
     </div>
     
@@ -656,6 +690,53 @@ new #[Layout('layouts.app')] class extends Component
                 </div>
             @endif
 
+        @elseif($type === 'live')
+            <div class="mb-4 p-4 rounded-lg border" style="background: #F5F3FF; border-color: #DDD6FE;">
+                <div class="flex items-center gap-2 mb-3">
+                    <span style="font-size: 1.1rem;">🔴</span>
+                    <h3 class="text-base font-semibold text-gray-800" style="margin: 0;">Live Class Session</h3>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Date &amp; time</label>
+                        <input type="datetime-local" wire:model="liveClassStartsAt" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border bg-white" style="outline: none;">
+                        @error('liveClassStartsAt') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Duration (minutes)</label>
+                        <input type="number" min="5" max="1440" wire:model="liveClassDuration" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border bg-white" style="outline: none;" placeholder="60">
+                        @error('liveClassDuration') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+                    </div>
+                </div>
+
+                <div class="mt-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Class link <span class="font-normal text-gray-500">(optional)</span></label>
+                    <input type="url" wire:model="liveClassLink" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border bg-white" style="outline: none;" placeholder="https://meet.google.com/... or https://zoom.us/j/...">
+                    @error('liveClassLink') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+                    <p class="text-xs text-gray-500 mt-1">Leave empty if you will share the link another way — students still see the schedule.</p>
+                </div>
+
+                <div class="mt-4 pt-4" style="border-top: 1px solid #DDD6FE;">
+                    <label class="flex items-center cursor-pointer">
+                        <input type="checkbox" wire:model.live="liveClassJoinEnabled" class="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" style="width: 18px; height: 18px; cursor: pointer;">
+                        <span class="ml-2 text-sm font-semibold text-gray-800">Allow students to join</span>
+                    </label>
+                    <p class="text-xs text-gray-500 mt-1 ml-6">
+                        @if($liveClassJoinEnabled)
+                            Students see the Join button once a link is set. Switch off to hide the link until you are ready.
+                        @else
+                            Joining is closed — students see the schedule only, even if a link is saved.
+                        @endif
+                    </p>
+                </div>
+            </div>
+
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-700 mb-1">What will be covered (Optional)</label>
+                <textarea wire:model="liveClassDescription" rows="4" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="Agenda, what to prepare before joining..."></textarea>
+                @error('liveClassDescription') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+            </div>
         @elseif($type === 'quiz')
             <div class="mb-4">
                 <label class="block text-sm font-medium text-gray-700 mb-1">Quiz Instructions / Description (Optional)</label>

@@ -264,7 +264,8 @@ new #[Layout('layouts.app')] class extends Component
                 <a href="/content/{{ $moduleContent->id }}/add?type=image" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">Image Content</a>
                 <a href="/content/{{ $moduleContent->id }}/add?type=video" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">Video Content</a>
                 <a href="/content/{{ $moduleContent->id }}/add?type=link" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">External Link</a>
-                <a href="/content/{{ $moduleContent->id }}/add?type=quiz" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none;">Interactive Quiz</a>
+                <a href="/content/{{ $moduleContent->id }}/add?type=quiz" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">Interactive Quiz</a>
+                <a href="/content/{{ $moduleContent->id }}/add?type=live" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none;">Live Class</a>
             </div>
         </div>
         @endif
@@ -302,6 +303,7 @@ new #[Layout('layouts.app')] class extends Component
                 'LinkContent' => 'External Link',
                 'QuizContent' => 'Quiz',
                 'ImageContent' => 'Image',
+                'LiveClassContent' => 'Live Class',
             ];
         @endphp
 
@@ -740,6 +742,82 @@ new #[Layout('layouts.app')] class extends Component
                             </button>
                         </div>
                     </form>
+                </div>
+            @elseif($type === 'LiveClassContent')
+                @php
+                    $status = $contentable->status();
+                    $palette = match ($status) {
+                        'live' => ['bg' => '#FEF2F2', 'border' => '#FECACA', 'accent' => '#DC2626', 'label' => 'Live now'],
+                        'ended' => ['bg' => '#F9FAFB', 'border' => '#E5E7EB', 'accent' => '#6B7280', 'label' => 'Ended'],
+                        default => ['bg' => '#F5F3FF', 'border' => '#DDD6FE', 'accent' => '#6D28D9', 'label' => 'Upcoming'],
+                    };
+                @endphp
+
+                <div style="padding: 24px; background: {{ $palette['bg'] }}; border: 1px solid {{ $palette['border'] }}; border-radius: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap;">
+                        <div>
+                            <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: {{ $palette['accent'] }};">
+                                @if($status === 'live')
+                                    <span style="width: 8px; height: 8px; border-radius: 9999px; background: {{ $palette['accent'] }}; display: inline-block;"></span>
+                                @endif
+                                {{ $palette['label'] }}
+                            </span>
+                            <h3 style="margin: 8px 0 0; font-size: 1.25rem; font-weight: 700; color: #111827;">
+                                {{ $contentable->title ?? 'Live Class' }}
+                            </h3>
+                            <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; color: #374151;">
+                                <span style="display: flex; align-items: center; gap: 8px;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                    </svg>
+                                    {{ $contentable->starts_at->format('l, j F Y') }}
+                                </span>
+                                <span style="display: flex; align-items: center; gap: 8px;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    {{ $contentable->starts_at->format('H:i') }} – {{ $contentable->endsAt()->format('H:i') }}
+                                    <span style="color: #6B7280;">({{ $contentable->duration_minutes ?: 60 }} min)</span>
+                                </span>
+                                @if($status === 'upcoming')
+                                    <span style="color: #6B7280; font-size: 0.85rem;">Starts {{ $contentable->starts_at->diffForHumans() }}</span>
+                                @endif
+                            </div>
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px;">
+                            @if($contentable->canJoin() && $status !== 'ended')
+                                <a href="{{ $contentable->join_link }}" target="_blank" rel="noopener noreferrer"
+                                   style="display: inline-flex; align-items: center; gap: 8px; background: {{ $palette['accent'] }}; color: white; padding: 12px 24px; border-radius: 8px; font-weight: 600; text-decoration: none;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                    </svg>
+                                    {{ $status === 'live' ? 'Join now' : 'Join class' }}
+                                </a>
+                            @elseif($contentable->canJoin())
+                                <a href="{{ $contentable->join_link }}" target="_blank" rel="noopener noreferrer" style="font-size: 0.85rem; color: #4F46E5; text-decoration: underline;">
+                                    Open class link
+                                </a>
+                            @elseif(!$contentable->is_join_enabled)
+                                <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; color: #6B7280; background: white; border: 1px solid #E5E7EB; padding: 8px 14px; border-radius: 8px;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                    </svg>
+                                    Joining is closed
+                                </span>
+                            @else
+                                <span style="font-size: 0.85rem; color: #6B7280; font-style: italic; max-width: 220px; text-align: right;">
+                                    No link yet — your instructor will share it.
+                                </span>
+                            @endif
+                        </div>
+                    </div>
+
+                    @if($contentable->description)
+                        <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid {{ $palette['border'] }}; color: #374151; font-size: 0.95rem; line-height: 1.6;">
+                            {!! nl2br(e($contentable->description)) !!}
+                        </div>
+                    @endif
                 </div>
             @elseif($type == 'ImageContent')
                 <div>
