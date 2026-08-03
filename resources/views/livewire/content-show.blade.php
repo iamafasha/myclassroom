@@ -6,9 +6,113 @@ new #[Layout('layouts.app')] class extends Component
 {
     public $moduleContent;
 
+    public $scoringPivotId = null;
+
+    public array $scoreInputs = [];
+
     public function mount($moduleContent)
     {
         $this->moduleContent = \App\Models\ModuleContent::find($moduleContent);
+    }
+
+    public function openScoring($pivotId)
+    {
+        $this->scoringPivotId = $pivotId;
+        $this->scoreInputs = [];
+
+        foreach ($this->scoringRows as $row) {
+            $parts = explode('/', $row['answer']->score ?? '');
+            $this->scoreInputs[$row['user']->id] = [
+                'obtained' => $parts[0] ?? '',
+                'total' => $parts[1] ?? '',
+            ];
+        }
+    }
+
+    public function closeScoring()
+    {
+        $this->scoringPivotId = null;
+        $this->scoreInputs = [];
+    }
+
+    public function saveScores()
+    {
+        $pivot = $this->scoringPivot;
+
+        if (!$pivot) {
+            return;
+        }
+
+        foreach ($this->scoreInputs as $userId => $input) {
+            $obtained = trim((string) ($input['obtained'] ?? ''));
+            $total = trim((string) ($input['total'] ?? ''));
+
+            $answer = \App\Models\ContentExerciseAnswer::where('user_id', $userId)
+                ->where('content_module_content_id', $pivot->id)
+                ->first();
+
+            if ($obtained === '') {
+                if ($answer && $answer->score !== null) {
+                    $answer->score = null;
+                    $answer->save();
+                }
+                continue;
+            }
+
+            $answer ??= new \App\Models\ContentExerciseAnswer([
+                'user_id' => $userId,
+                'content_module_content_id' => $pivot->id,
+            ]);
+
+            $answer->score = $total === '' ? $obtained : $obtained . '/' . $total;
+            $answer->save();
+        }
+
+        $this->closeScoring();
+    }
+
+    public function getScoringPivotProperty()
+    {
+        return $this->scoringPivotId
+            ? \App\Models\ContentModuleContent::find($this->scoringPivotId)
+            : null;
+    }
+
+    public function getScoringRowsProperty()
+    {
+        $pivot = $this->scoringPivot;
+
+        if (!$pivot) {
+            return collect();
+        }
+
+        $answers = $pivot->exerciseAnswers()->get()->keyBy('user_id');
+
+        return $this->participants($answers->keys())->map(fn ($user) => [
+            'user' => $user,
+            'answer' => $answers->get($user->id),
+        ])->values();
+    }
+
+    private function participants($extraUserIds)
+    {
+        $course = $this->moduleContent->module?->course;
+
+        $classroomUserIds = $course
+            ? \App\Models\User::whereHas('classrooms', fn ($q) => $q->whereHas(
+                'courses',
+                fn ($q2) => $q2->where('courses.id', $course->id)
+            ))->pluck('id')
+            : collect();
+
+        $ids = $classroomUserIds->merge($extraUserIds)->push(auth()->id())->filter()->unique();
+
+        // No classroom links yet: fall back to every user so submissions are still scoreable.
+        if ($classroomUserIds->isEmpty()) {
+            return \App\Models\User::orderBy('name')->get();
+        }
+
+        return \App\Models\User::whereIn('id', $ids)->orderBy('name')->get();
     }
 
     public function moveContentItemUp($contentId)
@@ -559,9 +663,24 @@ new #[Layout('layouts.app')] class extends Component
                     $exerciseAnswer = $singleContent->pivot->exerciseAnswerFor(auth()->user());
                 @endphp
                 <div style="margin-top: 24px; padding: 24px; border: 1px solid #FCD34D; background: #FFFBEB; border-radius: 12px;">
-                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-                        <span style="font-size: 1.25rem;">📝</span>
-                        <h3 style="font-size: 1.1rem; font-weight: 700; color: #92400E; margin: 0;">Exercise Submission Required</h3>
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 1.25rem;">📝</span>
+                            <h3 style="font-size: 1.1rem; font-weight: 700; color: #92400E; margin: 0;">Exercise Submission Required</h3>
+                        </div>
+                        @php
+                            $submissionCount = $singleContent->pivot->exerciseAnswers()
+                                ->where(function ($q) {
+                                    $q->whereNotNull('submission_link')->orWhereNotNull('submission_file_path');
+                                })->count();
+                        @endphp
+                        <button type="button" wire:click="openScoring({{ $singleContent->pivot->id }})" style="background: white; color: #92400E; border: 1px solid #F59E0B; padding: 8px 14px; border-radius: 8px; font-weight: 600; font-size: 0.85rem; cursor: pointer; display: inline-flex; align-items: center; gap: 8px;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                            </svg>
+                            Submissions &amp; Scoring
+                            <span style="background: #FEF3C7; border: 1px solid #FCD34D; border-radius: 9999px; padding: 0 7px; font-size: 0.75rem; font-weight: 700;">{{ $submissionCount }}</span>
+                        </button>
                     </div>
 
                     @if($errors->has('exercise'))
@@ -602,11 +721,6 @@ new #[Layout('layouts.app')] class extends Component
 
                     <form action="{{ route('content.submit-exercise', [$moduleContent->id, $singleContent->id]) }}" method="POST" enctype="multipart/form-data">
                         @csrf
-                        @php
-                            $scoreParts = explode('/', $exerciseAnswer->score ?? '');
-                            $obtained = $scoreParts[0] ?? '';
-                            $total = isset($scoreParts[1]) ? $scoreParts[1] : '';
-                        @endphp
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
                             <div>
                                 <label style="display: block; font-size: 0.875rem; font-weight: 600; color: #78350F; margin-bottom: 6px;">Provide Answer Link</label>
@@ -617,15 +731,6 @@ new #[Layout('layouts.app')] class extends Component
                                 <label style="display: block; font-size: 0.875rem; font-weight: 600; color: #78350F; margin-bottom: 6px;">Or Upload Answer File</label>
                                 <input type="file" name="submission_file" style="width: 100%; padding: 6px 12px; background: white; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.875rem;">
                                 @error('submission_file') <span style="color: #DC2626; font-size: 0.75rem; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
-                            </div>
-                        </div>
-
-                        <div style="margin-bottom: 16px;">
-                            <label style="display: block; font-size: 0.875rem; font-weight: 600; color: #78350F; margin-bottom: 6px;">Exercise Score (Fraction format, e.g. 9/10)</label>
-                            <div style="display: flex; align-items: center; gap: 8px; max-width: 300px;">
-                                <input type="number" step="any" name="obtained_score" value="{{ old('obtained_score', $obtained) }}" placeholder="Score (e.g. 9)" style="flex: 1; padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.875rem; outline: none; background: white;">
-                                <span style="font-weight: bold; font-size: 1.25rem; color: #78350F;">/</span>
-                                <input type="number" step="any" name="total_score" value="{{ old('total_score', $total) }}" placeholder="Total (e.g. 10)" style="flex: 1; padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.875rem; outline: none; background: white;">
                             </div>
                         </div>
 
@@ -668,4 +773,112 @@ new #[Layout('layouts.app')] class extends Component
             </form>
         </div>
     </div>
+
+    @if($this->scoringPivot)
+        @php
+            $scoringContent = $this->scoringPivot->content;
+            $scoringRows = $this->scoringRows;
+            $scoredCount = $scoringRows->filter(fn ($row) => $row['answer'] && $row['answer']->score)->count();
+        @endphp
+        <div style="position: fixed; inset: 0; background-color: rgba(17, 24, 39, 0.6); z-index: 60; display: flex; align-items: center; justify-content: center; padding: 24px;">
+            <div style="background: white; border-radius: 12px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.2); width: 100%; max-width: 68rem; max-height: 88vh; display: flex; flex-direction: column; overflow: hidden;">
+
+                <div style="padding: 20px 24px; border-bottom: 1px solid #E5E7EB; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;">
+                    <div>
+                        <h2 style="margin: 0; font-size: 1.15rem; font-weight: 700; color: #111827;">Exercise Submissions &amp; Scoring</h2>
+                        <p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #6B7280;">
+                            {{ $moduleContent->label ?? 'Content' }}
+                            @if($scoringContent)
+                                &middot; {{ $contentTypeLabels[class_basename($scoringContent->contentable_type)] ?? 'Content' }}
+                            @endif
+                            &middot; {{ $scoredCount }}/{{ $scoringRows->count() }} scored
+                        </p>
+                    </div>
+                    <button type="button" wire:click="closeScoring" style="background: none; border: none; cursor: pointer; color: #6B7280; padding: 4px; line-height: 0;" title="Close">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+
+                <div style="overflow: auto; flex: 1;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.875rem;">
+                        <thead>
+                            <tr style="background: #F9FAFB; position: sticky; top: 0; z-index: 1;">
+                                <th style="text-align: left; padding: 10px 24px; font-size: 0.72rem; letter-spacing: 0.05em; text-transform: uppercase; color: #6B7280; border-bottom: 1px solid #E5E7EB;">Student</th>
+                                <th style="text-align: left; padding: 10px 16px; font-size: 0.72rem; letter-spacing: 0.05em; text-transform: uppercase; color: #6B7280; border-bottom: 1px solid #E5E7EB;">Submission</th>
+                                <th style="text-align: left; padding: 10px 16px; font-size: 0.72rem; letter-spacing: 0.05em; text-transform: uppercase; color: #6B7280; border-bottom: 1px solid #E5E7EB; white-space: nowrap;">Submitted</th>
+                                <th style="text-align: left; padding: 10px 24px; font-size: 0.72rem; letter-spacing: 0.05em; text-transform: uppercase; color: #6B7280; border-bottom: 1px solid #E5E7EB; width: 220px;">Score</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @forelse($scoringRows as $row)
+                                @php
+                                    $rowUser = $row['user'];
+                                    $answer = $row['answer'];
+                                    $hasSubmission = $answer && ($answer->submission_link || $answer->submission_file_path);
+                                @endphp
+                                <tr style="border-bottom: 1px solid #F3F4F6; {{ $rowUser->id === auth()->id() ? 'background: #FAFAFF;' : '' }}">
+                                    <td style="padding: 12px 24px; vertical-align: top;">
+                                        <div style="font-weight: 600; color: #111827;">
+                                            {{ $rowUser->name }}
+                                            @if($rowUser->id === auth()->id())
+                                                <span style="font-size: 0.7rem; font-weight: 600; color: #4F46E5; background: #EEF2FF; border: 1px solid #C7D2FE; padding: 1px 6px; border-radius: 9999px; margin-left: 4px;">You</span>
+                                            @endif
+                                        </div>
+                                        <div style="color: #6B7280; font-size: 0.8rem;">{{ $rowUser->email }}</div>
+                                    </td>
+                                    <td style="padding: 12px 16px; vertical-align: top;">
+                                        @if($hasSubmission)
+                                            @if($answer->submission_link)
+                                                <div style="margin-bottom: 4px;">
+                                                    <a href="{{ $answer->submission_link }}" target="_blank" rel="noopener noreferrer" style="color: #2563EB; text-decoration: underline; word-break: break-all;">
+                                                        {{ \Illuminate\Support\Str::limit($answer->submission_link, 60) }}
+                                                    </a>
+                                                </div>
+                                            @endif
+                                            @if($answer->submission_file_path)
+                                                <a href="{{ asset('storage/' . $answer->submission_file_path) }}" target="_blank" style="display: inline-flex; align-items: center; gap: 6px; color: #2563EB; text-decoration: underline;">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                                    </svg>
+                                                    Download file
+                                                </a>
+                                            @endif
+                                        @else
+                                            <span style="color: #9CA3AF; font-style: italic;">No submission yet</span>
+                                        @endif
+                                    </td>
+                                    <td style="padding: 12px 16px; vertical-align: top; color: #6B7280; white-space: nowrap;">
+                                        {{ $hasSubmission && $answer->updated_at ? $answer->updated_at->format('M j, Y H:i') : '—' }}
+                                    </td>
+                                    <td style="padding: 12px 24px; vertical-align: top;">
+                                        <div style="display: flex; align-items: center; gap: 6px;">
+                                            <input type="number" step="any" wire:model="scoreInputs.{{ $rowUser->id }}.obtained" placeholder="9" style="width: 72px; padding: 6px 10px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.875rem; outline: none;">
+                                            <span style="font-weight: 700; color: #6B7280;">/</span>
+                                            <input type="number" step="any" wire:model="scoreInputs.{{ $rowUser->id }}.total" placeholder="10" style="width: 72px; padding: 6px 10px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.875rem; outline: none;">
+                                        </div>
+                                    </td>
+                                </tr>
+                            @empty
+                                <tr>
+                                    <td colspan="4" style="padding: 40px; text-align: center; color: #6B7280;">
+                                        No students found for this course.
+                                    </td>
+                                </tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
+
+                <div style="padding: 16px 24px; border-top: 1px solid #E5E7EB; display: flex; justify-content: space-between; align-items: center; gap: 12px; background: #F9FAFB;">
+                    <span style="font-size: 0.8rem; color: #6B7280;">Leave a score blank to clear it.</span>
+                    <div style="display: flex; gap: 10px;">
+                        <button type="button" wire:click="closeScoring" style="padding: 9px 18px; border: 1px solid #D1D5DB; border-radius: 8px; background: white; font-size: 0.875rem; font-weight: 600; color: #374151; cursor: pointer;">Cancel</button>
+                        <button type="button" wire:click="saveScores" style="padding: 9px 18px; border: none; border-radius: 8px; background: #4F46E5; color: white; font-size: 0.875rem; font-weight: 600; cursor: pointer;">Save Scores</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    @endif
 </div>

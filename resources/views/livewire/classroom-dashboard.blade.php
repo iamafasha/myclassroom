@@ -21,8 +21,15 @@ new #[Layout('layouts.app')] class extends Component
     {
         $this->selectedCourseId = $courseId;
         $this->selectedModuleId = $moduleId;
+
+        // Never land on a course outside the user's classes.
+        if ($this->selectedCourseId && !Course::visibleTo(auth()->user())->whereKey($this->selectedCourseId)->exists()) {
+            $this->selectedCourseId = null;
+            $this->selectedModuleId = null;
+        }
+
         if (!$this->selectedCourseId) {
-            $firstCourse = Course::first();
+            $firstCourse = Course::visibleTo(auth()->user())->orderBy('title')->first();
             if ($firstCourse) {
                 $this->selectedCourseId = $firstCourse->id;
                 
@@ -51,6 +58,7 @@ new #[Layout('layouts.app')] class extends Component
         $course = Course::create([
             'title' => $this->newCourseTitle,
             'slug' => \Illuminate\Support\Str::slug($this->newCourseTitle . '-' . time()),
+            'created_by' => auth()->id(),
         ]);
 
         return redirect()->route('course.show', $course->id);
@@ -235,13 +243,13 @@ new #[Layout('layouts.app')] class extends Component
     #[Computed]
     public function courses()
     {
-        return Course::all();
+        return Course::visibleTo(auth()->user())->orderBy('title')->get();
     }
 
     #[Computed]
     public function currentCourse()
     {
-        return Course::find($this->selectedCourseId);
+        return Course::visibleTo(auth()->user())->find($this->selectedCourseId);
     }
 
     #[Computed]

@@ -45,6 +45,7 @@ new #[Layout('layouts.app')] class extends Component {
         Course::create([
             'title' => $this->title,
             'slug'  => $this->slug,
+            'created_by' => auth()->id(),
         ]);
 
         $this->reset(['title', 'slug', 'showCreateForm']);

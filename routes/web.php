@@ -27,12 +27,10 @@ Route::middleware('auth')->group(function () {
         $request->validate([
             'submission_link' => 'nullable|url',
             'submission_file' => 'nullable|file|max:51200',
-            'obtained_score' => 'nullable|numeric',
-            'total_score' => 'nullable|numeric',
         ]);
 
-        if (!$request->submission_link && !$request->hasFile('submission_file') && !$request->filled('obtained_score')) {
-            return back()->withErrors(['exercise' => 'Please provide an answer link, upload a file, or enter a score before submitting.']);
+        if (!$request->submission_link && !$request->hasFile('submission_file')) {
+            return back()->withErrors(['exercise' => 'Please provide an answer link or upload a file before submitting.']);
         }
 
         $pivot = App\Models\ContentModuleContent::where('module_content_id', $moduleContent->id)
@@ -51,12 +49,6 @@ Route::middleware('auth')->group(function () {
         if ($request->hasFile('submission_file')) {
             $path = $request->file('submission_file')->store('exercise_submissions', 'public');
             $answer->submission_file_path = $path;
-        }
-
-        if ($request->filled('obtained_score') && $request->filled('total_score')) {
-            $answer->score = $request->obtained_score . '/' . $request->total_score;
-        } elseif ($request->filled('obtained_score')) {
-            $answer->score = $request->obtained_score;
         }
 
         $answer->save();
