@@ -29,6 +29,17 @@ class Course extends Model
     }
 
     /**
+     * The classes this course is taught in, as one label. Null when it belongs to
+     * none — a course can exist on its own before it is added to a class.
+     */
+    public function classLabel(): ?string
+    {
+        $names = $this->classrooms->pluck('title')->filter();
+
+        return $names->isEmpty() ? null : $names->implode(' · ');
+    }
+
+    /**
      * Only the creator manages a course: modules, contents and submissions.
      */
     public function isManagedBy($user): bool

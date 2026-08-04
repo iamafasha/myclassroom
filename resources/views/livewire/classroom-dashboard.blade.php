@@ -24,6 +24,10 @@ new #[Layout('layouts.app')] class extends Component
     public $editModuleId = null;
     public $editModuleTitle = '';
 
+    public $showContentDateModal = false;
+    public $dateContentId = null;
+    public $contentStudyDate = '';
+
     public function mount($courseId = null, $moduleId = null)
     {
         $this->selectedCourseId = $courseId;
@@ -162,6 +166,56 @@ new #[Layout('layouts.app')] class extends Component
 
         $this->reset('showEditModuleModal', 'editModuleId', 'editModuleTitle');
         unset($this->modules, $this->currentModule);
+    }
+
+    /** Opens the small planner used to say when a content should be started. */
+    public function editContentDate($contentId)
+    {
+        $this->authorizeManage();
+
+        $moduleContent = $this->ownedModuleContent($contentId);
+        if (!$moduleContent) {
+            return;
+        }
+
+        $this->resetValidation('contentStudyDate');
+        $this->dateContentId = $moduleContent->id;
+        $this->contentStudyDate = $moduleContent->study_at?->format('Y-m-d') ?? '';
+        $this->showContentDateModal = true;
+    }
+
+    public function updateContentDate()
+    {
+        $this->authorizeManage();
+
+        $this->validate([
+            'contentStudyDate' => 'nullable|date',
+        ]);
+
+        $moduleContent = $this->ownedModuleContent($this->dateContentId);
+        if (!$moduleContent) {
+            return;
+        }
+
+        $moduleContent->update(['study_at' => $this->contentStudyDate ?: null]);
+
+        $this->reset('showContentDateModal', 'dateContentId', 'contentStudyDate');
+        unset($this->contents);
+    }
+
+    public function clearContentDate()
+    {
+        $this->contentStudyDate = '';
+        $this->updateContentDate();
+    }
+
+    /** Content rows are only editable through the course they belong to. */
+    private function ownedModuleContent($contentId)
+    {
+        return \App\Models\ModuleContent::whereHas(
+            'module',
+            fn ($query) => $query->where('course_id', $this->selectedCourseId)
+        )->find($contentId);
     }
 
     public function toggleComplete($contentId)
@@ -337,13 +391,13 @@ new #[Layout('layouts.app')] class extends Component
     #[Computed]
     public function courses()
     {
-        return Course::visibleTo(auth()->user())->orderBy('title')->get();
+        return Course::visibleTo(auth()->user())->with('classrooms')->orderBy('title')->get();
     }
 
     #[Computed]
     public function currentCourse()
     {
-        return Course::visibleTo(auth()->user())->find($this->selectedCourseId);
+        return Course::visibleTo(auth()->user())->with('classrooms')->find($this->selectedCourseId);
     }
 
     #[Computed]
@@ -352,7 +406,11 @@ new #[Layout('layouts.app')] class extends Component
         if (!$this->selectedCourseId) {
             return collect();
         }
-        return Module::where('course_id', $this->selectedCourseId)->orderBy('sort_order', 'asc')->orderBy('id', 'asc')->get();
+        return Module::where('course_id', $this->selectedCourseId)
+            ->with('moduleContents')
+            ->orderBy('sort_order', 'asc')
+            ->orderBy('id', 'asc')
+            ->get();
     }
 
     #[Computed]
@@ -380,9 +438,17 @@ new #[Layout('layouts.app')] class extends Component
 
         <div class="course-selector group" x-data="{ open: false }" @click.outside="open = false" style="position: relative; display: flex; align-items: center; gap: 8px;">
             
-            <div @click="open = !open" class="select-styled" style="flex: 1; cursor: pointer; display: flex; justify-content: space-between; align-items: center; background-image: none; user-select: none;">
-                <span>{{ $this->currentCourse ? $this->currentCourse->title : 'Select a course' }}</span>
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#6B7280" :style="open ? 'transform: rotate(180deg); transition: transform 0.2s;' : 'transition: transform 0.2s;'">
+            <div @click="open = !open" class="select-styled" style="flex: 1; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 8px; background-image: none; user-select: none;">
+                <span style="min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ $this->currentCourse ? $this->currentCourse->title : 'Select a course' }}</span>
+                    {{-- The class this course is taught in, when it belongs to one. --}}
+                    @if($this->currentCourse?->classLabel())
+                        <span style="font-size: 11px; font-weight: 500; color: #6B7280; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                            in {{ $this->currentCourse->classLabel() }}
+                        </span>
+                    @endif
+                </span>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#6B7280" style="flex-shrink: 0;" :style="open ? 'transform: rotate(180deg); transition: transform 0.2s;' : 'transition: transform 0.2s;'">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
                 </svg>
             </div>
@@ -393,6 +459,11 @@ new #[Layout('layouts.app')] class extends Component
                     <a href="{{ route('course.show', $course->id) }}" wire:navigate style="display: block; text-decoration: none;"
                          class="custom-select-option {{ $selectedCourseId == $course->id ? 'selected' : '' }}">
                         {{ $course->title }}
+                        @if($course->classLabel())
+                            <span style="display: block; margin-top: 2px; font-size: 11px; font-weight: 500; color: #6B7280;">
+                                in {{ $course->classLabel() }}
+                            </span>
+                        @endif
                     </a>
                 @endforeach
                 @if($this->courses->isEmpty())
@@ -424,7 +495,8 @@ new #[Layout('layouts.app')] class extends Component
                      class="module-card design group {{ $selectedModuleId == $module->id ? 'active' : '' }}" 
                      style="position: relative; cursor: pointer; user-select: none; transition: all 0.2s;">
                     <div class="module-header">
-                        <div class="module-date">{{ $module->created_at->format('d F') }}</div>
+                        {{-- Mirrors the first date planned across this module's contents. --}}
+                        <div class="module-date">{{ $module->startDate()->format('d F') }}</div>
                     </div>
                     <div class="module-body" style="display: flex; justify-content: space-between; align-items: center;">
                         <div class="module-title">{{ $module->title }}</div>
@@ -512,7 +584,18 @@ new #[Layout('layouts.app')] class extends Component
                         <div class="content-name" style="{{ $moduleContent->is_completed ? 'text-decoration: line-through; color: #6B7280;' : '' }}">
                             {{ $moduleContent->label ?? 'Unnamed Content' }}
                         </div>
-                        <div class="content-details" style="margin-top: 4px; display: flex; align-items: center; gap: 6px;">
+                        <div class="content-details" style="margin-top: 4px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                            <span class="content-date {{ $moduleContent->study_at ? 'planned' : '' }}"
+                                  title="{{ $moduleContent->study_at ? 'Planned start: ' . $moduleContent->study_at->format('l, j F Y') : 'Added ' . $moduleContent->created_at->format('l, j F Y') }}">
+                                @if($moduleContent->study_at)
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                    </svg>
+                                    Start {{ $moduleContent->study_at->format('d F') }}
+                                @else
+                                    {{ $moduleContent->created_at->format('d F') }}
+                                @endif
+                            </span>
                             @php
                                 $firstContent = $moduleContent->contents->first();
                                 $exerciseContents = $moduleContent->contents->filter(fn ($c) => $c->pivot->is_exercise);
@@ -580,6 +663,11 @@ new #[Layout('layouts.app')] class extends Component
                     <div class="action-area" style="display: flex; gap: 6px; align-items: center;">
                             @if($this->canManageCourse)
                             <div class="opacity-0 group-hover:opacity-100 transition-opacity" style="display: flex; gap: 4px;">
+                                <button wire:click.stop="editContentDate({{ $moduleContent->id }})" style="background: #EEF2FF; color: #4338CA; border: none; padding: 8px; border-radius: 0.375rem; cursor: pointer; display: flex; align-items: center; justify-content: center;" title="Set start date">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                    </svg>
+                                </button>
                                 <button wire:click.stop="moveContentUp({{ $moduleContent->id }})" style="background: #F3F4F6; color: #4B5563; border: none; padding: 8px; border-radius: 0.375rem; cursor: pointer; display: flex; align-items: center; justify-content: center;" title="Move Content Up">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
@@ -688,6 +776,30 @@ new #[Layout('layouts.app')] class extends Component
             <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem;">
                 <button wire:click="$set('showEditModuleModal', false)" style="padding: 0.5rem 1rem; border: 1px solid #D1D5DB; border-radius: 0.375rem; background-color: white; font-size: 0.875rem; font-weight: 500; color: #374151; cursor: pointer;">Cancel</button>
                 <button wire:click="updateModule" style="padding: 0.5rem 1rem; border: none; border-radius: 0.375rem; background-color: #4F46E5; color: white; font-size: 0.875rem; font-weight: 500; cursor: pointer;">Save Changes</button>
+            </div>
+        </div>
+    </div>
+    @endif
+
+    <!-- Content Start Date Modal -->
+    @if($showContentDateModal)
+    <div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(0, 0, 0, 0.5); z-index: 50; display: flex; align-items: center; justify-content: center;">
+        <div style="background-color: white; border-radius: 0.5rem; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); padding: 1.5rem; width: 100%; max-width: 28rem;">
+            <h2 style="font-size: 1.25rem; font-weight: 600; margin-bottom: 0.25rem; color: #111827;">Start Date</h2>
+            <p style="font-size: 0.875rem; color: #6B7280; margin-bottom: 1rem;">When should learners start reading or studying this content?</p>
+
+            <div style="margin-bottom: 1rem;">
+                <label style="display: block; font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 0.25rem;">Date</label>
+                <input type="date" wire:model="contentStudyDate" wire:keydown.enter="updateContentDate" style="width: 100%; border: 1px solid #D1D5DB; border-radius: 0.375rem; padding: 0.5rem 0.75rem; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); outline: none;">
+                @error('contentStudyDate') <span style="color: #EF4444; font-size: 0.75rem; margin-top: 0.25rem; display: block;">{{ $message }}</span> @enderror
+            </div>
+
+            <div style="display: flex; justify-content: space-between; gap: 0.75rem; margin-top: 1.5rem;">
+                <button wire:click="clearContentDate" style="padding: 0.5rem 1rem; border: 1px solid #D1D5DB; border-radius: 0.375rem; background-color: white; font-size: 0.875rem; font-weight: 500; color: #6B7280; cursor: pointer;">Clear date</button>
+                <div style="display: flex; gap: 0.75rem;">
+                    <button wire:click="$set('showContentDateModal', false)" style="padding: 0.5rem 1rem; border: 1px solid #D1D5DB; border-radius: 0.375rem; background-color: white; font-size: 0.875rem; font-weight: 500; color: #374151; cursor: pointer;">Cancel</button>
+                    <button wire:click="updateContentDate" style="padding: 0.5rem 1rem; border: none; border-radius: 0.375rem; background-color: #4F46E5; color: white; font-size: 0.875rem; font-weight: 500; cursor: pointer;">Save Date</button>
+                </div>
             </div>
         </div>
     </div>

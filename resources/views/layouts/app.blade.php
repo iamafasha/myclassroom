@@ -273,6 +273,28 @@
             }
 
             .module-date { font-size: 10px; color: #9CA3AF; text-transform: uppercase; letter-spacing: 0.5px; }
+
+            /* Study date chip on a content row: muted when it is just the day the content
+               was added, accented once the owner has planned a start date for it. */
+            .content-date {
+                font-size: 10px;
+                color: #9CA3AF;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+            }
+
+            .content-date.planned {
+                color: #4338CA;
+                background: #EEF2FF;
+                border: 1px solid #C7D2FE;
+                border-radius: 9999px;
+                padding: 2px 8px;
+                font-weight: 700;
+            }
+
             .module-meta-right { font-size: 10px; text-align: right; }
             .meta-item { margin-bottom: 2px; }
             .meta-contents { color: #EF4444; }

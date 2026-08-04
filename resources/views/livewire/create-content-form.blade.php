@@ -9,6 +9,7 @@ use App\Models\ImageContent;
 use App\Models\LinkContent;
 use App\Models\QuizContent;
 use App\Models\LiveClassContent;
+use App\Models\SessionContent;
 use App\Models\File;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
@@ -27,6 +28,8 @@ new #[Layout('layouts.app')] class extends Component
     public $isEditing = false;
 
     public $label = '';
+    /** Day the learner should start on this content. Blank means "no planned date". */
+    public $studyAt = '';
     public $noteText = '';
     public $courseId;
 
@@ -58,7 +61,15 @@ new #[Layout('layouts.app')] class extends Component
     public $liveClassStartsAt = '';
     public $liveClassDuration = 60;
     public $liveClassDescription = '';
-    
+
+    public $sessionDescription = '';
+    public $sessionDuration = 30;
+    public $sessionBookingEnabled = true;
+    public $sessionAllowMultiple = false;
+    public $sessionMeetingLink = '';
+    /** Times students can book straight away. Empty means they request a time instead. */
+    public $sessionSlots = [];
+
     public function mount($moduleContentId, $contentId = null)
     {
         $moduleContent = ModuleContent::findOrFail($moduleContentId);
@@ -73,6 +84,7 @@ new #[Layout('layouts.app')] class extends Component
         $this->moduleId = $moduleContent->module_id;
         $this->courseId = $moduleContent->module->course_id;
         $this->label = $moduleContent->label ?? '';
+        $this->studyAt = $moduleContent->study_at?->format('Y-m-d') ?? '';
 
         if ($contentId) {
             $content = Content::findOrFail($contentId);
@@ -184,7 +196,29 @@ new #[Layout('layouts.app')] class extends Component
             $this->liveClassStartsAt = $contentable->starts_at?->format('Y-m-d\\TH:i') ?? '';
             $this->liveClassDuration = $contentable->duration_minutes ?: 60;
             $this->liveClassDescription = $contentable->description ?? '';
+        } elseif ($contentable instanceof SessionContent) {
+            $this->type = 'session';
+            $this->sessionDescription = $contentable->description ?? '';
+            $this->sessionDuration = $contentable->duration_minutes ?: 30;
+            $this->sessionBookingEnabled = (bool) $contentable->is_booking_enabled;
+            $this->sessionAllowMultiple = (bool) $contentable->allow_multiple;
+            $this->sessionMeetingLink = $contentable->meeting_link ?? '';
+            // Only times still ahead are worth editing; past ones drop off on save.
+            $this->sessionSlots = $contentable->slots()->map(fn ($slot) => $slot->format('Y-m-d\TH:i'))->all();
         }
+    }
+
+    public function addSessionSlot()
+    {
+        if (count($this->sessionSlots) < 10) {
+            $this->sessionSlots[] = '';
+        }
+    }
+
+    public function removeSessionSlot($index)
+    {
+        unset($this->sessionSlots[$index]);
+        $this->sessionSlots = array_values($this->sessionSlots);
     }
 
     /** A picked file must be one the current user uploaded. */
@@ -275,6 +309,7 @@ new #[Layout('layouts.app')] class extends Component
     {
         $this->validate([
             'label' => 'required|string|max:255',
+            'studyAt' => 'nullable|date',
         ]);
 
         $existingContentable = null;
@@ -339,43 +374,12 @@ new #[Layout('layouts.app')] class extends Component
                     'videoEndTime' => 'nullable|string',
                 ]);
 
-                $url = $this->videoExternalUrl;
+                // Save against the link and let the copy download in the background:
+                // fetching it here held the request open until PHP timed out.
+                $fileUrl = $this->videoExternalUrl;
                 $startTime = $this->videoStartTime;
                 $endTime = $this->videoEndTime;
-
-                $ytDlpBin = base_path('yt-dlp');
-                $dir = storage_path('app/public/videos');
-                if (!file_exists($dir)) {
-                    mkdir($dir, 0755, true);
-                }
-
-                $filename = 'yt_' . time() . '_' . \Illuminate\Support\Str::random(6) . '.mp4';
-                $outputPath = $dir . '/' . $filename;
-
-                $sectionParam = '';
-                if ($startTime || $endTime) {
-                    $start = $startTime ?: '00:00';
-                    $end = $endTime ?: 'inf';
-                    $sectionParam = '--download-sections "*' . $start . '-' . $end . '"';
-                }
-
-                $cmd = sprintf(
-                    '%s %s -f "best[ext=mp4]/best" --force-overwrites -o %s %s 2>&1',
-                    escapeshellcmd($ytDlpBin),
-                    $sectionParam,
-                    escapeshellarg($outputPath),
-                    escapeshellarg($url)
-                );
-
-                exec($cmd, $output, $returnCode);
-
-                if ($returnCode === 0 && file_exists($outputPath)) {
-                    $fileUrl = asset('storage/videos/' . $filename);
-                    $startTime = null;
-                    $endTime = null;
-                } else {
-                    $fileUrl = $url;
-                }
+                $downloadFromUrl = true;
             }
 
             $contentable = $existingContentable ?: new VideoContent();
@@ -384,6 +388,10 @@ new #[Layout('layouts.app')] class extends Component
             $contentable->start_time = $startTime;
             $contentable->end_time = $endTime;
             $contentable->save();
+
+            if (! empty($downloadFromUrl)) {
+                \App\Jobs\DownloadVideoContent::dispatch($contentable->id, $fileUrl, $startTime ?: null, $endTime ?: null);
+            }
         } elseif ($this->type === 'link') {
             $this->validate([
                 'linkUrl' => 'required|url',
@@ -446,11 +454,44 @@ new #[Layout('layouts.app')] class extends Component
             $contentable->starts_at = \Illuminate\Support\Carbon::parse($this->liveClassStartsAt);
             $contentable->duration_minutes = (int) $this->liveClassDuration ?: 60;
             $contentable->save();
+        } elseif ($this->type === 'session') {
+            // Blank rows are unused inputs, not an error.
+            $this->sessionSlots = array_values(array_filter($this->sessionSlots, fn ($slot) => trim((string) $slot) !== ''));
+
+            $this->validate([
+                'sessionDuration' => 'required|integer|min:10|max:240',
+                'sessionMeetingLink' => 'nullable|url|max:2048',
+                'sessionDescription' => 'nullable|string',
+                'sessionSlots' => 'nullable|array|max:10',
+                'sessionSlots.*' => 'required|date|after:now',
+            ], [
+                'sessionSlots.*.required' => 'Fill in this time or remove the row.',
+                'sessionSlots.*.after' => 'Bookable times must be in the future.',
+                'sessionMeetingLink.url' => 'The meeting link must be a valid URL (e.g. https://meet.google.com/...).',
+            ]);
+
+            $slots = collect($this->sessionSlots)
+                ->map(fn ($slot) => \Illuminate\Support\Carbon::parse($slot)->format('Y-m-d H:i:00'))
+                ->unique()
+                ->sort()
+                ->values()
+                ->all();
+
+            $contentable = $existingContentable ?: new SessionContent();
+            $contentable->title = $this->label;
+            $contentable->description = $this->sessionDescription ?: null;
+            $contentable->duration_minutes = (int) $this->sessionDuration ?: 30;
+            $contentable->is_booking_enabled = (bool) $this->sessionBookingEnabled;
+            $contentable->allow_multiple = (bool) $this->sessionAllowMultiple;
+            $contentable->meeting_link = trim($this->sessionMeetingLink) ?: null;
+            $contentable->available_slots = $slots ?: null;
+            $contentable->save();
         }
 
         if ($this->isEditing) {
             $moduleContent = ModuleContent::findOrFail($this->moduleContentId);
             $moduleContent->label = $this->label;
+            $moduleContent->study_at = $this->studyAt ?: null;
             if (!$moduleContent->slug) {
                 $moduleContent->slug = \Illuminate\Support\Str::slug($this->label . '-' . time());
             }
@@ -467,6 +508,7 @@ new #[Layout('layouts.app')] class extends Component
             if (!$moduleContent->label) {
                 $moduleContent->label = $this->label;
             }
+            $moduleContent->study_at = $this->studyAt ?: null;
             if (!$moduleContent->slug) {
                 $moduleContent->slug = \Illuminate\Support\Str::slug($this->label . '-' . time());
             }
@@ -488,12 +530,7 @@ new #[Layout('layouts.app')] class extends Component
 ?>
 
 <div style="width: 100%; height: 100%; overflow-y: auto;">
-@once
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script>
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-    </script>
-@endonce
+<x-pdf-viewer-engine />
 <div class="max-w-8xl mx-auto mt-10 mb-10" style="display: flex; align-items: flex-start; gap: 24px; padding: 0 24px;">
 
 <div class="flex-1 min-w-0 p-6 bg-white shadow-md rounded-lg border border-gray-200">
@@ -509,6 +546,7 @@ new #[Layout('layouts.app')] class extends Component
             <option value="link">External Link</option>
             <option value="quiz">Interactive Quiz</option>
             <option value="live">Live Class</option>
+            <option value="session">Mentor Session</option>
         </select>
     </div>
     
@@ -516,6 +554,13 @@ new #[Layout('layouts.app')] class extends Component
         <label class="block text-sm font-medium text-gray-700 mb-1">Content Label</label>
         <input type="text" wire:model="label" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="e.g. Introduction Note">
         @error('label') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+    </div>
+
+    <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-1">Start Date <span class="font-normal text-gray-500">(optional)</span></label>
+        <input type="date" wire:model="studyAt" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;">
+        <p class="text-xs text-gray-500 mt-1">When learners should start reading or studying this content. Leave blank for no planned date.</p>
+        @error('studyAt') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
     </div>
 
     @if(isset($type))
@@ -551,7 +596,7 @@ new #[Layout('layouts.app')] class extends Component
                     <label class="block text-sm font-medium text-gray-700 mb-1">
                         Start Page &mdash; Show From <span class="font-semibold text-indigo-600">{{ $pdfStartPercentage }}%</span> Down
                     </label>
-                    <input type="range" min="0" max="100" step="5" wire:model.live.debounce.300ms="pdfStartPercentage" class="w-full">
+                    <input type="range" min="0" max="100" step="1" wire:model.live.debounce.300ms="pdfStartPercentage" class="w-full">
                     <p class="text-xs text-gray-500 mt-1">Crops the top of the first page shown. 0% shows the whole page from the top.</p>
                     @error('pdfStartPercentage') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
                 </div>
@@ -559,7 +604,7 @@ new #[Layout('layouts.app')] class extends Component
                     <label class="block text-sm font-medium text-gray-700 mb-1">
                         End Page &mdash; Show Up To <span class="font-semibold text-indigo-600">{{ $pdfEndPercentage }}%</span> Down
                     </label>
-                    <input type="range" min="0" max="100" step="5" wire:model.live.debounce.300ms="pdfEndPercentage" class="w-full">
+                    <input type="range" min="0" max="100" step="1" wire:model.live.debounce.300ms="pdfEndPercentage" class="w-full">
                     <p class="text-xs text-gray-500 mt-1">Crops the bottom of the last page shown. 100% shows the whole page to the bottom.</p>
                     @error('pdfEndPercentage') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
                 </div>
@@ -593,6 +638,7 @@ new #[Layout('layouts.app')] class extends Component
                     <label class="block text-sm font-medium text-gray-700 mb-1">Video URL (YouTube link, MP4 link, etc.)</label>
                     <input type="url" wire:model="videoExternalUrl" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="https://www.youtube.com/watch?v=...">
                     @error('videoExternalUrl') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+                    <p class="text-xs text-gray-500 mt-1">Saves right away and plays from the link. A copy is fetched in the background and takes over once it is ready.</p>
                 </div>
             @endif
             
@@ -697,6 +743,80 @@ new #[Layout('layouts.app')] class extends Component
                 <textarea wire:model="liveClassDescription" rows="4" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="Agenda, what to prepare before joining..."></textarea>
                 @error('liveClassDescription') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
             </div>
+        @elseif($type === 'session')
+            <div class="mb-4 p-4 rounded-lg border" style="background: #FAF5FF; border-color: #DDD6FE;">
+                <div class="flex items-center gap-2 mb-1">
+                    <span style="font-size: 1.1rem;">🧑‍🏫</span>
+                    <h3 class="text-base font-semibold text-gray-800" style="margin: 0;">One-to-one Mentor Session</h3>
+                </div>
+                <p class="text-xs text-gray-500 mb-4">
+                    This block holds no single session. Every student who opens it books their own session with you, and manages it from inside the lesson.
+                </p>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Session length (minutes)</label>
+                        <input type="number" min="10" max="240" wire:model="sessionDuration" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border bg-white" style="outline: none;" placeholder="30">
+                        @error('sessionDuration') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Meeting link <span class="font-normal text-gray-500">(optional)</span></label>
+                        <input type="url" wire:model="sessionMeetingLink" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border bg-white" style="outline: none;" placeholder="https://meet.google.com/...">
+                        @error('sessionMeetingLink') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+                    </div>
+                </div>
+
+                <div class="mt-4 pt-4" style="border-top: 1px solid #DDD6FE;">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Times students can book instantly <span class="font-normal text-gray-500">(optional)</span></label>
+                    <p class="text-xs text-gray-500 mb-3">
+                        Leave empty and students send you a request instead — you then offer them times to choose from. A time disappears once someone books it, and past times drop off when you save.
+                    </p>
+
+                    @foreach($sessionSlots as $index => $slot)
+                        <div wire:key="session-slot-{{ $index }}" class="mb-2">
+                            <div class="flex items-center gap-2">
+                                <input type="datetime-local" wire:model="sessionSlots.{{ $index }}" class="flex-1 border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border bg-white" style="outline: none;">
+                                <button type="button" wire:click="removeSessionSlot({{ $index }})" title="Remove this time" class="text-gray-400 hover:text-red-500 p-1 text-sm font-bold cursor-pointer" style="background: none; border: none;">✕</button>
+                            </div>
+                            @error('sessionSlots.' . $index) <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+                        </div>
+                    @endforeach
+
+                    @if(count($sessionSlots) < 10)
+                        <button type="button" wire:click="addSessionSlot" class="text-xs text-indigo-600 font-semibold hover:underline mt-1 cursor-pointer" style="background: none; border: none; padding: 0;">
+                            + Add a bookable time
+                        </button>
+                    @endif
+                </div>
+
+                <div class="mt-4 pt-4" style="border-top: 1px solid #DDD6FE;">
+                    <label class="flex items-center cursor-pointer">
+                        <input type="checkbox" wire:model.live="sessionBookingEnabled" class="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" style="width: 18px; height: 18px; cursor: pointer;">
+                        <span class="ml-2 text-sm font-semibold text-gray-800">Students can book sessions here</span>
+                    </label>
+                    <p class="text-xs text-gray-500 mt-1 ml-6">
+                        @if($sessionBookingEnabled)
+                            Students see the booking button. Switch off to pause new bookings — sessions already booked are unaffected.
+                        @else
+                            New bookings are closed. Sessions already booked stay as they are.
+                        @endif
+                    </p>
+
+                    <label class="flex items-center cursor-pointer mt-3">
+                        <input type="checkbox" wire:model.live="sessionAllowMultiple" class="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" style="width: 18px; height: 18px; cursor: pointer;">
+                        <span class="ml-2 text-sm font-semibold text-gray-800">Allow several open sessions per student</span>
+                    </label>
+                    <p class="text-xs text-gray-500 mt-1 ml-6">
+                        Off means a student holds one session at a time here — they can book again once it is done or cancelled.
+                    </p>
+                </div>
+            </div>
+
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-700 mb-1">What this session is for (Optional)</label>
+                <textarea wire:model="sessionDescription" rows="4" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="What students should bring, what you will go through together..."></textarea>
+                @error('sessionDescription') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+            </div>
         @elseif($type === 'quiz')
             <div class="mb-4">
                 <label class="block text-sm font-medium text-gray-700 mb-1">Quiz Instructions / Description (Optional)</label>
@@ -780,18 +900,24 @@ new #[Layout('layouts.app')] class extends Component
             Preview <span class="font-normal text-gray-500">(how this will appear to students)</span>
         </label>
 
-        <div style="display: flex; justify-content: space-between; align-items: center; gap: 15px; margin-bottom: 10px; background: #F3F4F6; padding: 10px; border-radius: 8px; border: 1px solid #E5E7EB;">
-            <span id="pdf-form-page-count" style="font-size: 13px; color: #374151; font-weight: 500;">No PDF selected yet</span>
-            <div style="display: flex; gap: 10px; align-items: center;">
-                <button type="button" id="pdf-form-zoom-out" style="padding: 4px 10px; background: white; border: 1px solid #D1D5DB; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500; color: #374151;">- Zoom Out</button>
-                <span id="pdf-form-zoom-level" style="font-weight: bold; color: #111827; min-width: 40px; text-align: center; font-size: 12px;">100%</span>
-                <button type="button" id="pdf-form-zoom-in" style="padding: 4px 10px; background: white; border: 1px solid #D1D5DB; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500; color: #374151;">+ Zoom In</button>
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; background: #F3F4F6; padding: 10px; border-radius: 8px; border: 1px solid #E5E7EB;">
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <span id="pdf-form-page-count" style="font-size: 13px; color: #374151; font-weight: 500;">No PDF selected yet</span>
+                <span id="pdf-form-current-page" style="font-size: 12px; font-weight: 600; color: #111827; background: white; border: 1px solid #D1D5DB; border-radius: 999px; padding: 3px 10px; white-space: nowrap;">Page &ndash;</span>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <button type="button" id="pdf-form-zoom-out" style="padding: 4px 10px; background: white; border: 1px solid #D1D5DB; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500; color: #374151;" aria-label="Zoom out">&minus;</button>
+                <span id="pdf-form-zoom-level" style="font-weight: bold; color: #111827; min-width: 44px; text-align: center; font-size: 12px;">100%</span>
+                <button type="button" id="pdf-form-zoom-in" style="padding: 4px 10px; background: white; border: 1px solid #D1D5DB; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500; color: #374151;" aria-label="Zoom in">+</button>
+                <button type="button" id="pdf-form-zoom-fit" style="padding: 4px 10px; background: white; border: 1px solid #D1D5DB; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500; color: #374151;">Fit width</button>
             </div>
         </div>
 
-        <div style="width: 100%; max-height: 65vh; overflow: auto; background: #F3F4F6; border-radius: 8px; border: 1px solid #E5E7EB;">
-            <div id="pdf-form-preview-container" style="display: flex; flex-direction: column; gap: 15px; align-items: center; padding: 15px; min-width: min-content;">
-                <p style="color: #9CA3AF; font-weight: 500; font-size: 13px; text-align: center;">Select or upload a PDF above to preview it here.</p>
+        <div id="pdf-form-preview-scroll" style="width: 100%; max-height: 65vh; overflow: auto; background: #F3F4F6; border-radius: 8px; border: 1px solid #E5E7EB; touch-action: pan-x pan-y;">
+            <div id="pdf-form-preview-sizer" style="width: max-content; margin: 0 auto;">
+                <div id="pdf-form-preview-container" style="display: flex; flex-direction: column; gap: 15px; align-items: center; padding: 15px;">
+                    <p style="color: #9CA3AF; font-weight: 500; font-size: 13px; text-align: center;">Select or upload a PDF above to preview it here.</p>
+                </div>
             </div>
         </div>
     </div>
@@ -804,71 +930,27 @@ new #[Layout('layouts.app')] class extends Component
         const pageCountLabel = document.getElementById('pdf-form-page-count');
         const zoomInBtn = document.getElementById('pdf-form-zoom-in');
         const zoomOutBtn = document.getElementById('pdf-form-zoom-out');
-        const zoomLevelLabel = document.getElementById('pdf-form-zoom-level');
+        const zoomFitBtn = document.getElementById('pdf-form-zoom-fit');
 
-        let currentScale = 1.0;
+        const PLACEHOLDER = '<p style="color: #9CA3AF; font-weight: 500; font-size: 13px; text-align: center;">Select or upload a PDF above to preview it here.</p>';
+
+        let viewer = null;
         let loadedPdf = null;
         let currentUrl = null;
-        let currentStart = null;
-        let currentEnd = null;
-        let currentStartPercent = 0;
-        let currentEndPercent = 100;
 
-        function insertSorted(el, pageNum) {
-            el.dataset.page = pageNum;
-            let inserted = false;
-            for (let i = 0; i < container.children.length; i++) {
-                if (parseInt(container.children[i].dataset.page) > pageNum) {
-                    container.insertBefore(el, container.children[i]);
-                    inserted = true;
-                    break;
-                }
-            }
-            if (!inserted) container.appendChild(el);
-        }
-
-        function renderPages(pdf, scale) {
-            const startPage = currentStart ? parseInt(currentStart) : 1;
-            let endPage = currentEnd ? parseInt(currentEnd) : pdf.numPages;
-            if (isNaN(startPage) || startPage < 1) return;
-            if (isNaN(endPage) || endPage > pdf.numPages) endPage = pdf.numPages;
-
-            container.innerHTML = '';
-
-            for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
-                pdf.getPage(pageNum).then(function(page) {
-                    const viewport = page.getViewport({ scale: scale });
-                    const canvas = document.createElement('canvas');
-                    const ctx = canvas.getContext('2d');
-                    canvas.height = viewport.height;
-                    canvas.width = viewport.width;
-                    canvas.style.display = 'block';
-
-                    page.render({ canvasContext: ctx, viewport: viewport });
-
-                    const topPct = (pageNum === startPage) ? currentStartPercent : 0;
-                    const bottomPct = (pageNum === endPage) ? currentEndPercent : 100;
-
-                    if (topPct > 0 || bottomPct < 100) {
-                        const topSkip = viewport.height * (topPct / 100);
-                        const visibleHeight = Math.max(0, viewport.height * ((bottomPct - topPct) / 100));
-
-                        const cropWrapper = document.createElement('div');
-                        cropWrapper.style.overflow = 'hidden';
-                        cropWrapper.style.width = viewport.width + 'px';
-                        cropWrapper.style.height = visibleHeight + 'px';
-                        cropWrapper.style.boxShadow = '0 4px 6px -1px rgba(0,0,0,0.1)';
-
-                        canvas.style.marginTop = (-topSkip) + 'px';
-                        cropWrapper.appendChild(canvas);
-
-                        insertSorted(cropWrapper, pageNum);
-                    } else {
-                        canvas.style.boxShadow = '0 4px 6px -1px rgba(0,0,0,0.1)';
-                        insertSorted(canvas, pageNum);
-                    }
+        // The preview box is its own scroll container, so the engine anchors zooming to it.
+        function pdfViewer() {
+            if (!viewer) {
+                viewer = window.createPdfViewer({
+                    wrapper: document.getElementById('pdf-form-preview-scroll'),
+                    sizer: document.getElementById('pdf-form-preview-sizer'),
+                    container: container,
+                    levelEl: document.getElementById('pdf-form-zoom-level'),
+                    pageNoEl: document.getElementById('pdf-form-current-page'),
+                    verticalScroll: 'self'
                 });
             }
+            return viewer;
         }
 
         function waitForPdfjsLib(timeoutMs) {
@@ -925,22 +1007,26 @@ new #[Layout('layouts.app')] class extends Component
             });
         }
 
-        function loadAndRender(data) {
-            currentStart = data.startPage;
-            currentEnd = data.endPage;
-            currentStartPercent = data.startPercent;
-            currentEndPercent = data.endPercent;
+        function show(pdf, data) {
+            pdfViewer().setDocument(pdf, {
+                startPage: data.startPage ? parseInt(data.startPage) : 1,
+                endPage: data.endPage ? parseInt(data.endPage) : null,
+                startPercent: data.startPercent,
+                endPercent: data.endPercent
+            });
+        }
 
+        function loadAndRender(data) {
             if (!data.url) {
                 currentUrl = null;
                 loadedPdf = null;
                 pageCountLabel.textContent = 'No PDF selected yet';
-                container.innerHTML = '<p style="color: #9CA3AF; font-weight: 500; font-size: 13px; text-align: center;">Select or upload a PDF above to preview it here.</p>';
+                pdfViewer().message(PLACEHOLDER);
                 return;
             }
 
             if (data.url === currentUrl && loadedPdf) {
-                renderPages(loadedPdf, currentScale);
+                show(loadedPdf, data);
                 return;
             }
 
@@ -948,34 +1034,24 @@ new #[Layout('layouts.app')] class extends Component
             currentUrl = requestedUrl;
             loadedPdf = null;
             pageCountLabel.textContent = 'Loading page count…';
-            container.innerHTML = '<p style="color: #6B7280; font-weight: 500; font-size: 13px;">Loading preview…</p>';
+            pdfViewer().message('<p style="color: #6B7280; font-weight: 500; font-size: 13px;">Loading preview…</p>');
 
             fetchPdfWithRetry(requestedUrl, 3).then(function(pdf) {
                 if (requestedUrl !== currentUrl) return;
                 loadedPdf = pdf;
                 pageCountLabel.textContent = 'This PDF has ' + pdf.numPages + ' page' + (pdf.numPages === 1 ? '' : 's') + '.';
-                renderPages(pdf, currentScale);
+                show(pdf, data);
             }).catch(function(err) {
                 if (requestedUrl !== currentUrl) return;
                 pageCountLabel.textContent = 'Unable to load PDF preview.';
-                container.innerHTML = '<p style="color: #DC2626; font-size: 13px;">Failed to load PDF preview.</p>';
+                pdfViewer().message('<p style="color: #DC2626; font-size: 13px;">Failed to load PDF preview.</p>');
                 console.error(err);
             });
         }
 
-        zoomInBtn.addEventListener('click', function() {
-            currentScale += 0.25;
-            zoomLevelLabel.textContent = Math.round(currentScale * 100) + '%';
-            if (loadedPdf) renderPages(loadedPdf, currentScale);
-        });
-
-        zoomOutBtn.addEventListener('click', function() {
-            if (currentScale > 0.5) {
-                currentScale -= 0.25;
-                zoomLevelLabel.textContent = Math.round(currentScale * 100) + '%';
-                if (loadedPdf) renderPages(loadedPdf, currentScale);
-            }
-        });
+        zoomInBtn.addEventListener('click', () => pdfViewer().zoomBy(1.25));
+        zoomOutBtn.addEventListener('click', () => pdfViewer().zoomBy(1 / 1.25));
+        zoomFitBtn.addEventListener('click', () => pdfViewer().fitWidth());
 
         $wire.on('pdf-preview-changed', (event) => loadAndRender(event));
 

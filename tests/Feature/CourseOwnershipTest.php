@@ -187,3 +187,21 @@ it('offers only your own files when building content', function () {
 
     $form->set('pdfFileId', $mine->id)->call('save')->assertHasNoErrors();
 });
+
+it('names the class a course belongs to in the course selector', function () {
+    ['owner' => $owner, 'course' => $course] = seedCourse();
+
+    // A course on its own: nothing to name.
+    $loner = Course::create(['title' => 'Course B', 'slug' => 'course-b', 'created_by' => $owner->id]);
+
+    expect($course->classLabel())->toBe('Class A')
+        ->and($loner->classLabel())->toBeNull();
+
+    Livewire::actingAs($owner)->test('classroom-dashboard', ['courseId' => $course->id])
+        ->assertSee('in Class A');
+
+    // Taught in two classes at once, both named.
+    Classroom::create(['title' => 'Class B', 'admin_id' => $owner->id])->courses()->attach($course->id);
+
+    expect($course->fresh()->classLabel())->toBe('Class A · Class B');
+});

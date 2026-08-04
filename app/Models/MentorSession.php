@@ -40,6 +40,12 @@ class MentorSession extends Model
         return $this->belongsTo(Course::class);
     }
 
+    /** The Session content block this was booked from, if it came from inside a course. */
+    public function sessionContent()
+    {
+        return $this->belongsTo(SessionContent::class);
+    }
+
     public function student()
     {
         return $this->belongsTo(User::class, 'student_id');
@@ -66,6 +72,12 @@ class MentorSession extends Model
         $userId = $user instanceof User ? $user->id : $user;
 
         return $query->where(fn ($q) => $q->where('student_id', $userId)->orWhere('mentor_id', $userId));
+    }
+
+    /** Sessions booked from one Session content block. */
+    public function scopeForSessionContent($query, $sessionContent)
+    {
+        return $query->where('session_content_id', $sessionContent instanceof SessionContent ? $sessionContent->id : $sessionContent);
     }
 
     public function scopePending($query)

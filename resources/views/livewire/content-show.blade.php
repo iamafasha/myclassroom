@@ -292,6 +292,15 @@ new #[Layout('layouts.app')] class extends Component
             @endphp
             <a href="{{ $backUrl }}" wire:navigate style="color: #4F46E5; text-decoration: none; font-weight: 500; display: inline-block; margin-bottom: 15px;">&larr; Back to Dashboard</a>
             <h1 class="content-title" style="{{ $moduleContent->is_completed ? 'text-decoration: line-through; color: #6B7280;' : '' }}">{{ $moduleContent->label ?? 'Content' }}</h1>
+            @if($moduleContent->study_at)
+                <div style="margin-top: 8px; font-size: 0.8125rem; color: #4338CA; background: #EEF2FF; border: 1px solid #C7D2FE; border-radius: 9999px; padding: 3px 10px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;"
+                     title="Planned start date">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    Start {{ $moduleContent->study_at->format('D, j M Y') }}
+                </div>
+            @endif
         </div>
 
         @if($this->canManage)
@@ -309,7 +318,8 @@ new #[Layout('layouts.app')] class extends Component
                 <a href="/content/{{ $moduleContent->id }}/add?type=video" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">Video Content</a>
                 <a href="/content/{{ $moduleContent->id }}/add?type=link" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">External Link</a>
                 <a href="/content/{{ $moduleContent->id }}/add?type=quiz" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">Interactive Quiz</a>
-                <a href="/content/{{ $moduleContent->id }}/add?type=live" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none;">Live Class</a>
+                <a href="/content/{{ $moduleContent->id }}/add?type=live" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">Live Class</a>
+                <a href="/content/{{ $moduleContent->id }}/add?type=session" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none;">Mentor Session</a>
             </div>
         </div>
         @endif
@@ -348,6 +358,7 @@ new #[Layout('layouts.app')] class extends Component
                 'QuizContent' => 'Quiz',
                 'ImageContent' => 'Image',
                 'LiveClassContent' => 'Live Class',
+                'SessionContent' => 'Mentor Session',
             ];
         @endphp
 
@@ -385,122 +396,102 @@ new #[Layout('layouts.app')] class extends Component
                     $endPercent = $contentable->end_percentage ?? 100;
                 @endphp
 
+                <x-pdf-viewer-engine />
+
                 @once
-                    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-                    <script>
-                        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-                    </script>
+                    <style>
+                        .pdfv-toolbar {
+                            display: flex; justify-content: center; align-items: center; gap: 8px;
+                            flex-wrap: wrap; margin-bottom: 12px; padding: 8px 10px;
+                            background: #F3F4F6; border: 1px solid #E5E7EB; border-radius: 8px;
+                            position: sticky; top: 0; z-index: 5;
+                        }
+                        .pdfv-btn {
+                            padding: 6px 12px; background: white; border: 1px solid #D1D5DB;
+                            border-radius: 6px; cursor: pointer; font-weight: 500; color: #374151;
+                            font-size: 0.85rem; line-height: 1.2; min-width: 38px;
+                            -webkit-tap-highlight-color: transparent;
+                        }
+                        .pdfv-btn:hover { background: #F9FAFB; }
+                        .pdfv-btn:active { background: #F3F4F6; }
+                        .pdfv-level {
+                            font-weight: 700; color: #111827; min-width: 58px; text-align: center;
+                            font-size: 0.85rem; font-variant-numeric: tabular-nums;
+                        }
+                        .pdfv-pageno {
+                            font-size: 0.8rem; font-weight: 600; color: #111827; background: white;
+                            border: 1px solid #D1D5DB; border-radius: 999px; padding: 5px 12px;
+                            font-variant-numeric: tabular-nums; white-space: nowrap;
+                        }
+                        .pdfv-hint { font-size: 0.75rem; color: #6B7280; margin-left: 4px; }
+                        .pdfv-wrapper {
+                            width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch;
+                            background: #F3F4F6; border-radius: 8px; border: 1px solid #E5E7EB;
+                            touch-action: pan-x pan-y;
+                        }
+                        .pdfv-sizer { width: max-content; margin: 0 auto; }
+                        .pdfv-pages {
+                            display: flex; flex-direction: column; align-items: center;
+                            gap: 16px; padding: 16px;
+                        }
+                        .pdfv-status { color: #6B7280; font-weight: 500; padding: 24px 8px; }
+                        @media (max-width: 640px) {
+                            .pdfv-pages { padding: 8px; gap: 10px; }
+                            .pdfv-hint { width: 100%; text-align: center; margin: 2px 0 0; }
+                        }
+                    </style>
                 @endonce
 
-                <div style="display: flex; justify-content: center; gap: 15px; margin-bottom: 15px; align-items: center; background: #F3F4F6; padding: 10px; border-radius: 8px; border: 1px solid #E5E7EB;">
-                    <button id="zoom-out-{{ $uid }}" style="padding: 6px 12px; background: white; border: 1px solid #D1D5DB; border-radius: 4px; cursor: pointer; font-weight: 500; color: #374151;">- Zoom Out</button>
-                    <span id="zoom-level-{{ $uid }}" style="font-weight: bold; color: #111827; min-width: 60px; text-align: center;">150%</span>
-                    <button id="zoom-in-{{ $uid }}" style="padding: 6px 12px; background: white; border: 1px solid #D1D5DB; border-radius: 4px; cursor: pointer; font-weight: 500; color: #374151;">+ Zoom In</button>
+                <div class="pdfv-toolbar" id="pdf-toolbar-{{ $uid }}">
+                    <button type="button" class="pdfv-btn" id="zoom-out-{{ $uid }}" aria-label="Zoom out">&minus;</button>
+                    <span class="pdfv-level" id="zoom-level-{{ $uid }}">100%</span>
+                    <button type="button" class="pdfv-btn" id="zoom-in-{{ $uid }}" aria-label="Zoom in">+</button>
+                    <button type="button" class="pdfv-btn" id="zoom-fit-{{ $uid }}">Fit width</button>
+                    <span class="pdfv-pageno" id="pdf-pageno-{{ $uid }}">Page &ndash;</span>
+                    <span class="pdfv-hint">Pinch to zoom &middot; double&#8209;tap to toggle</span>
                 </div>
 
-                <div id="pdf-wrapper-{{ $uid }}" style="width: 100%; overflow-x: auto; background: #F3F4F6; border-radius: 8px; border: 1px solid #E5E7EB;">
-                    <div id="pdf-container-{{ $uid }}" style="display: flex; flex-direction: column; gap: 20px; align-items: center; padding: 20px; min-width: min-content;">
-                        <p id="pdf-loading-{{ $uid }}" style="color: #6B7280; font-weight: 500;">Loading PDF pages...</p>
+                <div class="pdfv-wrapper" id="pdf-wrapper-{{ $uid }}">
+                    <div class="pdfv-sizer" id="pdf-sizer-{{ $uid }}">
+                        <div class="pdfv-pages" id="pdf-container-{{ $uid }}">
+                            <p class="pdfv-status" id="pdf-loading-{{ $uid }}">Loading PDF pages...</p>
+                        </div>
                     </div>
                 </div>
 
                 <script>
                     (function() {
-                        const url = "{{ $pdfUrl }}";
-                        const startPage = {{ $startPage }};
-                        let endPage = {{ $endPage }};
-                        const startPercent = {{ $startPercent }};
-                        const endPercent = {{ $endPercent }};
-                        const container = document.getElementById('pdf-container-{{ $uid }}');
-                        const loading = document.getElementById('pdf-loading-{{ $uid }}');
+                        const viewer = window.createPdfViewer({
+                            wrapper: document.getElementById('pdf-wrapper-{{ $uid }}'),
+                            sizer: document.getElementById('pdf-sizer-{{ $uid }}'),
+                            container: document.getElementById('pdf-container-{{ $uid }}'),
+                            toolbar: document.getElementById('pdf-toolbar-{{ $uid }}'),
+                            levelEl: document.getElementById('zoom-level-{{ $uid }}'),
+                            pageNoEl: document.getElementById('pdf-pageno-{{ $uid }}')
+                        });
 
-                        let currentScale = 1.5;
-                        let loadedPdf = null;
-
-                        function insertSorted(el, pageNum) {
-                            el.dataset.page = pageNum;
-                            let inserted = false;
-                            for (let i = 0; i < container.children.length; i++) {
-                                if (container.children[i].dataset && parseInt(container.children[i].dataset.page) > pageNum) {
-                                    container.insertBefore(el, container.children[i]);
-                                    inserted = true;
-                                    break;
-                                }
-                            }
-                            if (!inserted) {
-                                container.appendChild(el);
-                            }
-                        }
-
-                        function renderPages(pdf, scale) {
-                            container.innerHTML = '';
-
-                            for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
-                                pdf.getPage(pageNum).then(function(page) {
-                                    const viewport = page.getViewport({scale: scale});
-                                    const canvas = document.createElement('canvas');
-                                    const ctx = canvas.getContext('2d');
-                                    canvas.height = viewport.height;
-                                    canvas.width = viewport.width;
-                                    canvas.style.display = 'block';
-
-                                    const renderContext = {
-                                        canvasContext: ctx,
-                                        viewport: viewport
-                                    };
-                                    page.render(renderContext);
-
-                                    const topPct = (pageNum === startPage) ? startPercent : 0;
-                                    const bottomPct = (pageNum === endPage) ? endPercent : 100;
-
-                                    if (topPct > 0 || bottomPct < 100) {
-                                        const topSkip = viewport.height * (topPct / 100);
-                                        const visibleHeight = Math.max(0, viewport.height * ((bottomPct - topPct) / 100));
-
-                                        const wrapper = document.createElement('div');
-                                        wrapper.style.overflow = 'hidden';
-                                        wrapper.style.width = viewport.width + 'px';
-                                        wrapper.style.height = visibleHeight + 'px';
-                                        wrapper.style.boxShadow = '0 4px 6px -1px rgba(0,0,0,0.1)';
-
-                                        canvas.style.marginTop = (-topSkip) + 'px';
-                                        wrapper.appendChild(canvas);
-
-                                        insertSorted(wrapper, pageNum);
-                                    } else {
-                                        canvas.style.boxShadow = '0 4px 6px -1px rgba(0,0,0,0.1)';
-                                        insertSorted(canvas, pageNum);
-                                    }
-                                });
-                            }
-                        }
-
-                        pdfjsLib.getDocument(url).promise.then(function(pdf) {
-                            loading.style.display = 'none';
-                            loadedPdf = pdf;
-
-                            if (endPage === null || endPage > pdf.numPages) {
-                                endPage = pdf.numPages;
-                            }
-
-                            renderPages(pdf, currentScale);
+                        pdfjsLib.getDocument(@json($pdfUrl)).promise.then(function(pdf) {
+                            return viewer.setDocument(pdf, {
+                                startPage: {{ $startPage }},
+                                endPage: {{ $endPage }},
+                                startPercent: {{ $startPercent }},
+                                endPercent: {{ $endPercent }}
+                            });
                         }).catch(function(err) {
-                            loading.innerText = 'Failed to load PDF.';
+                            viewer.message('<p class="pdfv-status">Failed to load PDF.</p>');
                             console.error(err);
                         });
 
                         document.getElementById('zoom-in-{{ $uid }}').addEventListener('click', function() {
-                            currentScale += 0.25;
-                            document.getElementById('zoom-level-{{ $uid }}').innerText = Math.round(currentScale * 100) + '%';
-                            if (loadedPdf) renderPages(loadedPdf, currentScale);
+                            viewer.zoomBy(1.25);
                         });
 
                         document.getElementById('zoom-out-{{ $uid }}').addEventListener('click', function() {
-                            if (currentScale > 0.5) {
-                                currentScale -= 0.25;
-                                document.getElementById('zoom-level-{{ $uid }}').innerText = Math.round(currentScale * 100) + '%';
-                                if (loadedPdf) renderPages(loadedPdf, currentScale);
-                            }
+                            viewer.zoomBy(1 / 1.25);
+                        });
+
+                        document.getElementById('zoom-fit-{{ $uid }}').addEventListener('click', function() {
+                            viewer.fitWidth();
                         });
                     })();
                 </script>
@@ -1084,6 +1075,9 @@ new #[Layout('layouts.app')] class extends Component
                         </div>
                     @endif
                 </div>
+            @elseif($type === 'SessionContent')
+                <!-- Each viewer gets their own session on this block, managed inside the panel. -->
+                <livewire:sessions.content-panel :session-content="$contentable->id" :key="'session-panel-' . $contentable->id" />
             @elseif($type == 'ImageContent')
                 <div>
                     <img src="{{ $contentable->file_url }}" alt="{{ $contentable->name }}">

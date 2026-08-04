@@ -49,7 +49,7 @@ new #[Layout('layouts.app')] class extends Component {
     public function myRequests()
     {
         return MentorSession::forStudent(auth()->user())
-            ->with(['course', 'mentor'])
+            ->with(['course', 'mentor', 'sessionContent.content.moduleContents'])
             ->orderByRaw("CASE WHEN status IN ('proposed', 'pending', 'scheduled') THEN 0 ELSE 1 END")
             ->orderByRaw('COALESCE(scheduled_at, preferred_at, created_at) DESC')
             ->get();
@@ -59,7 +59,7 @@ new #[Layout('layouts.app')] class extends Component {
     public function incoming()
     {
         return MentorSession::forMentor(auth()->user())
-            ->with(['course', 'student'])
+            ->with(['course', 'student', 'sessionContent.content.moduleContents'])
             ->orderByRaw("CASE WHEN status = 'pending' THEN 0 WHEN status IN ('proposed', 'scheduled') THEN 1 ELSE 2 END")
             ->orderByRaw('COALESCE(scheduled_at, preferred_at, created_at) ASC')
             ->get();
@@ -500,6 +500,16 @@ new #[Layout('layouts.app')] class extends Component {
                                         from {{ $session->student?->name ?? 'student' }}
                                     @endif
                                 </p>
+                                @php($originContent = $session->sessionContent?->moduleContent())
+                                @if($originContent)
+                                    <a href="{{ route('content.show', $originContent->id) }}" wire:navigate
+                                       style="display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; padding: 3px 9px; border-radius: 9999px; background: #F5F3FF; border: 1px solid #EDE9FE; font-size: 11px; font-weight: 600; color: #6D28D9; text-decoration: none;">
+                                        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                                        </svg>
+                                        Booked from {{ \Illuminate\Support\Str::limit($originContent->label ?? 'a lesson', 34) }}
+                                    </a>
+                                @endif
                             </div>
                             <span style="flex-shrink: 0; padding: 4px 10px; border-radius: 9999px; font-size: 11px; font-weight: 700; background: {{ $pillBg }}; color: {{ $pillText }};">
                                 {{ $session->statusLabel() }}
