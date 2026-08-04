@@ -18,4 +18,15 @@ class File extends Model
     {
         return $query->where('user_id', $user instanceof User ? $user->id : $user);
     }
+
+    public function scopeSearch($query, ?string $term)
+    {
+        $term = trim((string) $term);
+
+        if ($term === '') {
+            return $query;
+        }
+
+        return $query->where('name', 'like', '%' . $term . '%');
+    }
 }
