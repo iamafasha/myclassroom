@@ -19,6 +19,22 @@ class File extends Model
         return $query->where('user_id', $user instanceof User ? $user->id : $user);
     }
 
+    /** Maps an uploaded file's extension onto the stored file_type value. */
+    public static function typeForExtension(?string $extension): string
+    {
+        $extension = strtolower(trim((string) $extension));
+
+        return match (true) {
+            in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'svg']) => 'image',
+            $extension === 'pdf' => 'pdf',
+            in_array($extension, ['doc', 'docx']) => 'word',
+            in_array($extension, ['xls', 'xlsx']) => 'excel',
+            in_array($extension, ['mp4', 'mov', 'avi']) => 'video',
+            in_array($extension, ['mp3', 'wav']) => 'audio',
+            default => $extension ?: 'other',
+        };
+    }
+
     public function scopeSearch($query, ?string $term)
     {
         $term = trim((string) $term);

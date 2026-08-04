@@ -135,14 +135,14 @@ it('shows each user only their own files', function () {
     $owner = User::factory()->create();
     $other = User::factory()->create();
 
-    Livewire::actingAs($owner)->test('files.index')
-        ->set('name', 'Owner Notes')
-        ->set('uploads', [UploadedFile::fake()->create('owner.pdf', 10, 'application/pdf')])
-        ->call('save')->assertHasNoErrors();
+    $this->actingAs($owner)->postJson(route('files.upload'), [
+        'name' => 'Owner Notes',
+        'file' => UploadedFile::fake()->create('owner.pdf', 10, 'application/pdf'),
+    ])->assertOk();
 
-    Livewire::actingAs($other)->test('files.index')
-        ->set('uploads', [UploadedFile::fake()->create('other.pdf', 10, 'application/pdf')])
-        ->call('save')->assertHasNoErrors();
+    $this->actingAs($other)->postJson(route('files.upload'), [
+        'file' => UploadedFile::fake()->create('other.pdf', 10, 'application/pdf'),
+    ])->assertOk();
 
     expect(File::ownedBy($owner)->pluck('name')->all())->toBe(['Owner Notes']);
     expect(File::ownedBy($other)->pluck('name')->all())->toBe(['other.pdf']);
@@ -156,9 +156,9 @@ it('stops a user from deleting someone else file', function () {
     $owner = User::factory()->create();
     $other = User::factory()->create();
 
-    Livewire::actingAs($owner)->test('files.index')
-        ->set('uploads', [UploadedFile::fake()->create('owner.pdf', 10, 'application/pdf')])
-        ->call('save');
+    $this->actingAs($owner)->postJson(route('files.upload'), [
+        'file' => UploadedFile::fake()->create('owner.pdf', 10, 'application/pdf'),
+    ])->assertOk();
 
     $file = File::ownedBy($owner)->first();
 

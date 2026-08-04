@@ -17,6 +17,28 @@ Route::middleware('auth')->group(function () {
 
     \Livewire\Volt\Volt::route('/files', 'files.index')->name('files.index');
 
+    // One request per file, so the file manager can upload several at once and retry just the ones that fail.
+    Route::post('/files/upload', function (Illuminate\Http\Request $request) {
+        $request->validate([
+            'file' => 'required|file',
+            'name' => 'nullable|string|max:255',
+        ], [
+            'file.required' => 'No file was received. It may be larger than the server allows.',
+        ]);
+
+        $upload = $request->file('file');
+        $name = trim((string) $request->input('name'));
+
+        $file = App\Models\File::create([
+            'user_id' => $request->user()->id,
+            'name' => $name !== '' ? $name : $upload->getClientOriginalName(),
+            'file_path' => $upload->store('uploads', 'public'),
+            'file_type' => App\Models\File::typeForExtension($upload->getClientOriginalExtension()),
+        ]);
+
+        return response()->json(['id' => $file->id, 'name' => $file->name]);
+    })->name('files.upload');
+
     Route::get('/live-class/{liveClass}/calendar.ics', function (App\Models\LiveClassContent $liveClass) {
         abort_unless($liveClass->isVisibleTo(auth()->user()), 403);
 

@@ -3,17 +3,10 @@
 use Livewire\Volt\Component;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Computed;
-use Livewire\WithFileUploads;
 use Illuminate\Support\Facades\Storage;
 use App\Models\File;
 
 new #[Layout('layouts.app')] class extends Component {
-    use WithFileUploads;
-
-    public $uploads = [];
-
-    public string $name = '';
-
     /** Active file type filter: 'all', 'other', or a key from typeGroups(). */
     public string $type = 'all';
 
@@ -30,37 +23,42 @@ new #[Layout('layouts.app')] class extends Component {
         $this->reset(['type', 'search']);
     }
 
-    public function save()
+    /** Id of the file being renamed, if any. */
+    public ?int $editingId = null;
+
+    public string $editingName = '';
+
+    public function startRename($fileId)
     {
-        $this->validate([
-            'uploads' => 'required|array|min:1',
-            'name' => 'nullable|string|max:255',
-        ], [
-            'uploads.required' => 'Please choose at least one file to upload.',
-        ]);
+        $file = File::ownedBy(auth()->user())->findOrFail($fileId);
 
-        $single = count($this->uploads) === 1;
+        $this->resetErrorBag();
+        $this->editingId = $file->id;
+        $this->editingName = $file->name;
+    }
 
-        foreach ($this->uploads as $upload) {
-            $originalName = $upload->getClientOriginalName();
+    public function cancelRename()
+    {
+        $this->resetErrorBag();
+        $this->reset(['editingId', 'editingName']);
+    }
 
-            File::create([
-                'user_id' => auth()->id(),
-                'name' => $single && trim($this->name) !== '' ? trim($this->name) : $originalName,
-                'file_path' => $upload->store('uploads', 'public'),
-                'file_type' => $this->fileTypeFor($upload->getClientOriginalExtension()),
-            ]);
-        }
+    public function rename()
+    {
+        $this->validate(
+            ['editingName' => 'required|string|max:255'],
+            ['editingName.required' => 'Please give the file a name.'],
+        );
 
-        $count = count($this->uploads);
+        $file = File::ownedBy(auth()->user())->findOrFail($this->editingId);
 
-        $this->reset(['uploads', 'name']);
+        // Only the display name changes — file_path stays put, so every link to this file keeps working.
+        $file->update(['name' => trim($this->editingName)]);
+
+        $this->cancelRename();
         $this->refreshFiles();
 
-        // Let the form clear the native file input and its selection count.
-        $this->dispatch('uploads-cleared');
-
-        session()->flash('success', $count . ' file' . ($count === 1 ? '' : 's') . ' uploaded successfully.');
+        session()->flash('success', 'File renamed successfully.');
     }
 
     public function delete($fileId)
@@ -149,21 +147,6 @@ new #[Layout('layouts.app')] class extends Component {
     {
         unset($this->files, $this->typeCounts);
     }
-
-    private function fileTypeFor($extension)
-    {
-        $extension = strtolower($extension);
-
-        return match (true) {
-            in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'svg']) => 'image',
-            $extension === 'pdf' => 'pdf',
-            in_array($extension, ['doc', 'docx']) => 'word',
-            in_array($extension, ['xls', 'xlsx']) => 'excel',
-            in_array($extension, ['mp4', 'mov', 'avi']) => 'video',
-            in_array($extension, ['mp3', 'wav']) => 'audio',
-            default => $extension ?: 'other',
-        };
-    }
 }; ?>
 
 <div class="panel-list" style="width: 100%; padding: 40px; overflow-y: auto;">
@@ -178,38 +161,98 @@ new #[Layout('layouts.app')] class extends Component {
         </div>
     @endif
 
-    <div style="display: flex; gap: 30px; margin-top: 20px;">
+    <div style="display: flex; gap: 30px; margin-top: 20px;"
+         x-data="{
+             queue: [],
+             nextId: 1,
+             selected: [],
+             endpoint: '{{ route('files.upload') }}',
+             get multiple() { return this.selected.length > 1 },
+             pickFiles(event) {
+                 let files = Array.from(event.target.files || []);
+                 // Clear the name first, so the field is never disabled with stale text in it.
+                 if (files.length > 1) { $refs.nameInput.value = '' }
+                 this.selected = files.map(file => file.name);
+             },
+             startUploads() {
+                 let files = Array.from($refs.fileInput.files || []);
+                 if (! files.length) return;
+
+                 let customName = files.length === 1 ? $refs.nameInput.value.trim() : '';
+
+                 files.forEach(file => {
+                     let item = { id: this.nextId++, file: file, customName: customName, name: customName || file.name, progress: 0, status: 'uploading', error: '' };
+                     this.queue.push(item);
+                     this.send(item);
+                 });
+
+                 // Free the picker straight away so more files can be queued while these are still going.
+                 $refs.fileInput.value = '';
+                 $refs.nameInput.value = '';
+                 this.selected = [];
+             },
+             retry(item) {
+                 item.status = 'uploading';
+                 item.progress = 0;
+                 item.error = '';
+                 this.send(item);
+             },
+             send(item) {
+                 let body = new FormData();
+                 body.append('file', item.file);
+                 if (item.customName) { body.append('name', item.customName) }
+
+                 let request = new XMLHttpRequest();
+                 request.open('POST', this.endpoint);
+                 request.setRequestHeader('Accept', 'application/json');
+                 request.setRequestHeader('X-CSRF-TOKEN', document.querySelector('meta[name=\'csrf-token\']').content);
+
+                 request.upload.addEventListener('progress', event => {
+                     if (event.lengthComputable) { item.progress = Math.round((event.loaded / event.total) * 100) }
+                 });
+
+                 request.addEventListener('load', () => {
+                     if (request.status >= 200 && request.status < 300) {
+                         item.progress = 100;
+                         item.status = 'done';
+                         this.refreshList();
+                         setTimeout(() => this.dismiss(item.id), 2500);
+                     } else {
+                         item.status = 'failed';
+                         item.error = this.errorFrom(request);
+                     }
+                 });
+
+                 request.addEventListener('error', () => {
+                     item.status = 'failed';
+                     item.error = 'Network error — check your connection.';
+                 });
+
+                 request.send(body);
+             },
+             errorFrom(request) {
+                 try {
+                     let body = JSON.parse(request.responseText);
+                     return body.message || 'Upload failed.';
+                 } catch (error) {
+                     return request.status === 413 ? 'File is too large to upload.' : 'Upload failed.';
+                 }
+             },
+             refreshList() {
+                 // One refresh per burst of finished uploads rather than one per file.
+                 clearTimeout(this.refreshHandle);
+                 this.refreshHandle = setTimeout(() => $wire.$refresh(), 250);
+             },
+             dismiss(id) { this.queue = this.queue.filter(item => item.id !== id) },
+         }">
         <!-- Upload Form -->
         <div class="content-card" style="flex: 1; flex-direction: column; align-items: flex-start; align-self: flex-start;">
             <h2 style="margin-top: 0; font-size: 18px;">Upload New File</h2>
 
-            <form wire:submit="save"
-                  x-data="{
-                      progress: 0,
-                      uploading: false,
-                      fileCount: {{ count($uploads) }},
-                      get multiple() { return this.fileCount > 1 },
-                      countFiles(event) {
-                          let count = event.target.files ? event.target.files.length : 0;
-                          // Clear the name first, so the field is never disabled with stale text in it.
-                          if (count > 1) {
-                              $refs.nameInput.value = '';
-                              $wire.set('name', '', false);
-                          }
-                          this.fileCount = count;
-                      },
-                  }"
-                  x-on:livewire-upload-start="uploading = true; progress = 0"
-                  x-on:livewire-upload-finish="uploading = false; progress = 100"
-                  x-on:livewire-upload-cancel="uploading = false"
-                  x-on:livewire-upload-error="uploading = false"
-                  x-on:livewire-upload-progress="progress = $event.detail.progress"
-                  x-on:uploads-cleared.window="fileCount = 0; $refs.fileInput.value = ''"
-                  style="width: 100%; margin-top: 15px;">
-
+            <form x-on:submit.prevent="startUploads()" style="width: 100%; margin-top: 15px;">
                 <div style="margin-bottom: 15px;">
                     <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px;">File Name (Optional, single file only)</label>
-                    <input type="text" wire:model="name" placeholder="Enter file name"
+                    <input type="text" name="name" maxlength="255" placeholder="Enter file name"
                            x-ref="nameInput"
                            x-bind:disabled="multiple"
                            x-bind:style="multiple
@@ -219,50 +262,69 @@ new #[Layout('layouts.app')] class extends Component {
                     <div x-show="multiple" x-cloak style="font-size: 12px; color: #6B7280; margin-top: 5px;">
                         Multiple files selected — each keeps its original name.
                     </div>
-                    @error('name')
-                        <div style="color: #EF4444; font-size: 12px; margin-top: 5px;">{{ $message }}</div>
-                    @enderror
                 </div>
 
                 <div style="margin-bottom: 20px;">
                     <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px;">Select Files</label>
-                    <input type="file" wire:model="uploads" multiple x-ref="fileInput" x-on:change="countFiles($event)" style="width: 100%; padding: 10px; border: 1px dashed #D1D5DB; border-radius: 8px;">
-                    @error('uploads')
-                        <div style="color: #EF4444; font-size: 12px; margin-top: 5px;">{{ $message }}</div>
-                    @enderror
-                    @error('uploads.*')
-                        <div style="color: #EF4444; font-size: 12px; margin-top: 5px;">{{ $message }}</div>
-                    @enderror
+                    <input type="file" multiple x-ref="fileInput" x-on:change="pickFiles($event)" style="width: 100%; padding: 10px; border: 1px dashed #D1D5DB; border-radius: 8px;">
                 </div>
 
-                <div x-show="uploading" style="display: none; margin-bottom: 15px;">
-                    <div style="font-size: 13px; margin-bottom: 4px; color: #4B5563;">Uploading… <span x-text="progress + '%'"></span></div>
-                    <div style="width: 100%; background: #E5E7EB; border-radius: 4px;">
-                        <div :style="{ width: progress + '%' }" style="height: 8px; background: #4F46E5; border-radius: 4px; transition: width 0.2s;"></div>
-                    </div>
+                <div x-show="selected.length" x-cloak style="margin-bottom: 15px; font-size: 13px; color: #4B5563;">
+                    <strong>Ready to upload:</strong>
+                    <ul style="margin: 6px 0 0; padding-left: 18px;">
+                        <template x-for="fileName in selected" :key="fileName">
+                            <li x-text="fileName"></li>
+                        </template>
+                    </ul>
                 </div>
-
-                @if($uploads)
-                    <div style="margin-bottom: 15px; font-size: 13px; color: #4B5563;">
-                        <strong>Ready to upload:</strong>
-                        <ul style="margin: 6px 0 0; padding-left: 18px;">
-                            @foreach($uploads as $upload)
-                                <li>{{ $upload->getClientOriginalName() }}</li>
-                            @endforeach
-                        </ul>
-                    </div>
-                @endif
 
                 <button type="submit" class="btn-solve" style="width: 100%; justify-content: center;"
-                        x-bind:disabled="uploading" wire:loading.attr="disabled" wire:target="save">
-                    <span wire:loading.remove wire:target="save">Upload Files</span>
-                    <span wire:loading wire:target="save">Saving…</span>
+                        x-bind:disabled="! selected.length"
+                        x-bind:style="selected.length ? {} : { opacity: '0.5', cursor: 'not-allowed' }">
+                    Upload Files
                 </button>
             </form>
         </div>
 
         <!-- File List -->
         <div style="flex: 2;">
+            <!-- Upload Queue: one row, one progress bar, one retry per file -->
+            <div wire:ignore x-show="queue.length" x-cloak style="margin-bottom: 20px;">
+                <div style="font-size: 13px; font-weight: 600; color: #4B5563; margin-bottom: 10px;">
+                    Uploads (<span x-text="queue.filter(item => item.status === 'uploading').length"></span> in progress)
+                </div>
+
+                <template x-for="item in queue" :key="item.id">
+                    <div style="background: #ffffff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 18px; margin-bottom: 10px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 15px;">
+                            <div style="min-width: 0;">
+                                <div style="font-size: 14px; font-weight: 600; color: #111827; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" x-text="item.name"></div>
+                                <div style="font-size: 12px; margin-top: 3px;"
+                                     x-bind:style="{ color: item.status === 'failed' ? '#DC2626' : (item.status === 'done' ? '#059669' : '#6B7280') }"
+                                     x-text="item.status === 'failed' ? item.error : (item.status === 'done' ? 'Uploaded' : 'Uploading… ' + item.progress + '%')"></div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+                                <button type="button" x-show="item.status === 'failed'" x-on:click="retry(item)"
+                                        style="background: #EFF6FF; color: #2563EB; border: none; padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;">
+                                    Retry
+                                </button>
+                                <button type="button" x-show="item.status !== 'uploading'" x-on:click="dismiss(item.id)"
+                                        style="background: #F3F4F6; color: #6B7280; border: none; padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;">
+                                    Dismiss
+                                </button>
+                            </div>
+                        </div>
+                        <div style="height: 6px; background: #E5E7EB; border-radius: 4px; margin-top: 12px; overflow: hidden;">
+                            <div x-bind:style="{
+                                     width: item.progress + '%',
+                                     background: item.status === 'failed' ? '#DC2626' : (item.status === 'done' ? '#059669' : '#4F46E5'),
+                                 }"
+                                 style="height: 100%; border-radius: 4px; transition: width 0.2s;"></div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
             <!-- Search -->
             <div style="position: relative; margin-bottom: 16px;">
                 <svg width="16" height="16" fill="none" stroke="#9CA3AF" viewBox="0 0 24 24" style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%);">
@@ -295,15 +357,38 @@ new #[Layout('layouts.app')] class extends Component {
                 @forelse ($this->files as $file)
                     @php($style = $this->badgeStyle($file->file_type))
                     <div class="content-card" style="padding: 15px 20px;" wire:key="file-{{ $file->id }}">
-                        <div class="content-info">
-                            <div class="content-name">{{ $file->name }}</div>
+                        <div class="content-info" style="min-width: 0;">
+                            @if ($editingId === $file->id)
+                                <form wire:submit="rename" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                    <input type="text" wire:model="editingName" maxlength="255"
+                                           wire:keydown.escape="cancelRename"
+                                           x-init="$nextTick(() => $el.focus())"
+                                           style="flex: 1; min-width: 200px; padding: 8px 10px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 14px; font-weight: 600;">
+                                    <button type="submit" style="background: #2563EB; color: #ffffff; border: none; padding: 8px 15px; border-radius: 6px; font-weight: 600; cursor: pointer;">Save</button>
+                                    <button type="button" wire:click="cancelRename" style="background: #F3F4F6; color: #6B7280; border: none; padding: 8px 15px; border-radius: 6px; font-weight: 600; cursor: pointer;">Cancel</button>
+                                </form>
+                                @error('editingName')
+                                    <div style="color: #EF4444; font-size: 12px; margin-top: 5px;">{{ $message }}</div>
+                                @enderror
+                            @else
+                                <div class="content-name">{{ $file->name }}</div>
+                            @endif
                             <div class="content-details">
                                 <span class="badge" style="background: {{ $style['bg'] }}; color: {{ $style['color'] }};">{{ strtoupper($file->file_type) }}</span>
                                 <span>Uploaded {{ $file->created_at->diffForHumans() }}</span>
                                 <span><a href="{{ asset('storage/' . $file->file_path) }}" target="_blank" style="color: #2563EB; text-decoration: none;">View File</a></span>
                             </div>
                         </div>
-                        <div class="action-area">
+                        <div class="action-area" style="display: flex; align-items: center; gap: 8px;">
+                            @if ($editingId !== $file->id)
+                                <button type="button" wire:click="startRename({{ $file->id }})" title="Rename file"
+                                        style="background: #EFF6FF; color: #2563EB; border: none; padding: 8px 15px; border-radius: 6px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+                                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                                    </svg>
+                                    Rename
+                                </button>
+                            @endif
                             <button type="button" wire:click="delete({{ $file->id }})" wire:confirm="Are you sure you want to delete this file?"
                                     style="background: #FEE2E2; color: #EF4444; border: none; padding: 8px 15px; border-radius: 6px; font-weight: 600; cursor: pointer;">
                                 Delete
