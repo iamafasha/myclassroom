@@ -61,6 +61,19 @@ new #[Layout('layouts.app')] class extends Component {
         session()->flash('success_course', 'Course removed successfully.');
     }
 
+    /** Public classes are searchable and joinable by anyone under Discover. */
+    public function toggleVisibility()
+    {
+        abort_unless($this->classroom->isAdministeredBy(auth()->user()), 403, 'You do not manage this class.');
+
+        $this->classroom->is_public = ! $this->classroom->is_public;
+        $this->classroom->save();
+
+        session()->flash('success_visibility', $this->classroom->is_public
+            ? 'Class is now public — anyone can find and join it.'
+            : 'Class is now private — only people you add can join.');
+    }
+
     /** Soft delete the class; attendees and courses stay attached. */
     public function deleteClassroom()
     {
@@ -103,7 +116,25 @@ new #[Layout('layouts.app')] class extends Component {
                 </div>
             </div>
             <div style="display: flex; align-items: center; gap: 12px;">
-                <span class="badge" style="background-color: #EFF6FF; color: #2563EB; border: 1px solid #BFDBFE; font-size: 12px; padding: 4px 12px;">Active Class</span>
+                <button type="button" wire:click="toggleVisibility"
+                        title="{{ $classroom->is_public ? 'Make this class private' : 'Make this class public' }}"
+                        class="badge"
+                        style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; padding: 6px 12px;
+                               background-color: {{ $classroom->is_public ? '#ECFDF5' : '#F3F4F6' }};
+                               color: {{ $classroom->is_public ? '#047857' : '#4B5563' }};
+                               border: 1px solid {{ $classroom->is_public ? '#A7F3D0' : '#E5E7EB' }};">
+                    @if($classroom->is_public)
+                        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0zM3.6 9h16.8M3.6 15h16.8M12 3a15 15 0 010 18a15 15 0 010-18z"></path>
+                        </svg>
+                        Public Class
+                    @else
+                        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                        </svg>
+                        Private Class
+                    @endif
+                </button>
                 <button type="button" wire:click="deleteClassroom"
                         wire:confirm="Delete &quot;{{ $classroom->title }}&quot;? Attendees will lose access to its courses."
                         style="display: inline-flex; align-items: center; gap: 6px; background: white; border: 1px solid #FECACA; color: #DC2626; font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 8px; cursor: pointer; transition: background-color 0.2s;"
@@ -116,6 +147,12 @@ new #[Layout('layouts.app')] class extends Component {
             </div>
         </div>
     </div>
+
+    @if (session('success_visibility'))
+        <div style="margin: 20px 40px -20px; background-color: #ECFDF5; color: #065F46; padding: 12px 15px; border-radius: 8px; font-size: 13px; font-weight: 500; border: 1px solid #A7F3D0;">
+            {{ session('success_visibility') }}
+        </div>
+    @endif
 
     <div style="padding: 40px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px;">
         
