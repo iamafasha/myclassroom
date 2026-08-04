@@ -38,6 +38,19 @@ class File extends Model
         return round($size, $size < 10 && $unit > 0 ? 1 : 0) . ' ' . $units[$unit];
     }
 
+    /** The shape the searchable file picker renders for one file. */
+    public function pickerEntry(): array
+    {
+        return [
+            'id' => (string) $this->id,
+            'name' => $this->name,
+            'type' => $this->file_type,
+            'size' => $this->sizeForHumans(),
+            'url' => asset('storage/' . $this->file_path),
+            'uploaded' => $this->created_at?->diffForHumans(),
+        ];
+    }
+
     /** Maps an uploaded file's extension onto the stored file_type value. */
     public static function typeForExtension(?string $extension): string
     {

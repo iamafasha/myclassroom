@@ -233,7 +233,7 @@ new #[Layout('layouts.app')] class extends Component
             $course->delete();
         }
         
-        return redirect()->route('home');
+        return redirect()->route('dashboard');
     }
 
     public function moveModuleUp($moduleId)

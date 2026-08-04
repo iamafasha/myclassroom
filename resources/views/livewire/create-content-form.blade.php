@@ -10,15 +10,14 @@ use App\Models\LinkContent;
 use App\Models\QuizContent;
 use App\Models\LiveClassContent;
 use App\Models\File;
+use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 
 use Livewire\Attributes\Layout;
 use Livewire\Volt\Component;
-use Livewire\WithFileUploads;
 
 new #[Layout('layouts.app')] class extends Component
 {
-    use WithFileUploads;
     public $moduleContentId;
     public $moduleId;
     #[Url]
@@ -32,25 +31,20 @@ new #[Layout('layouts.app')] class extends Component
     public $courseId;
 
     public $pdfFileId = '';
-    public $pdfSourceType = 'existing'; // 'existing' or 'upload'
-    public $pdfUpload = null;
     public $pdfStartPage = '';
     public $pdfEndPage = '';
     public $pdfStartPercentage = 0;
     public $pdfEndPercentage = 100;
-    public $pdfFiles = [];
 
     public $videoFileId = '';
     public $videoSourceType = 'file'; // 'file' or 'url'
     public $videoExternalUrl = '';
     public $videoStartTime = '';
     public $videoEndTime = '';
-    public $videoFiles = [];
 
     public $imageFileId = '';
     public $imageSourceType = 'file';
     public $imageExternalUrl;
-    public $imageFiles = [];
 
     public $linkUrl = '';
     public $linkDescription = '';
@@ -79,9 +73,6 @@ new #[Layout('layouts.app')] class extends Component
         $this->moduleId = $moduleContent->module_id;
         $this->courseId = $moduleContent->module->course_id;
         $this->label = $moduleContent->label ?? '';
-        $this->pdfFiles = File::ownedBy(auth()->user())->where('file_type', 'pdf')->get();
-        $this->videoFiles = File::ownedBy(auth()->user())->whereIn('file_type', ['video', 'mp4', 'mov', 'avi'])->get();
-        $this->imageFiles = File::ownedBy(auth()->user())->whereIn('file_type', ['image', 'png', 'jpg', 'jpeg'])->get();
 
         if ($contentId) {
             $content = Content::findOrFail($contentId);
@@ -98,6 +89,38 @@ new #[Layout('layouts.app')] class extends Component
         if (empty($this->questions)) {
             $this->addQuestion();
         }
+    }
+
+    /**
+     * The picker lists are computed per render rather than held in state, so a file uploaded
+     * from inside a picker shows up on the next round trip.
+     */
+    #[Computed]
+    public function pdfFiles()
+    {
+        return $this->filesForPicker(['pdf']);
+    }
+
+    #[Computed]
+    public function videoFiles()
+    {
+        return $this->filesForPicker(['video', 'mp4', 'mov', 'avi']);
+    }
+
+    #[Computed]
+    public function imageFiles()
+    {
+        return $this->filesForPicker(['image', 'png', 'jpg', 'jpeg']);
+    }
+
+    private function filesForPicker(array $types): array
+    {
+        return File::ownedBy(auth()->user())
+            ->whereIn('file_type', $types)
+            ->latest()
+            ->get()
+            ->map(fn (File $file) => $file->pickerEntry())
+            ->all();
     }
 
     private function loadContentable($contentable)
@@ -118,7 +141,6 @@ new #[Layout('layouts.app')] class extends Component
             $this->noteText = $contentable->content;
         } elseif ($contentable instanceof PdfNotesContent) {
             $this->type = 'pdf';
-            $this->pdfSourceType = 'existing';
             $this->pdfStartPage = $contentable->start_position;
             $this->pdfEndPage = $contentable->end_position;
             $this->pdfStartPercentage = $contentable->start_percentage ?? 0;
@@ -173,21 +195,18 @@ new #[Layout('layouts.app')] class extends Component
 
     public function pdfPreviewUrl()
     {
-        if ($this->pdfSourceType === 'upload' && $this->pdfUpload) {
-            return $this->pdfUpload->temporaryUrl();
+        if (! $this->pdfFileId) {
+            return null;
         }
 
-        if ($this->pdfSourceType === 'existing' && $this->pdfFileId) {
-            $file = File::ownedBy(auth()->user())->find($this->pdfFileId);
-            return $file ? asset('storage/' . $file->file_path) : null;
-        }
+        $file = File::ownedBy(auth()->user())->find($this->pdfFileId);
 
-        return null;
+        return $file ? asset('storage/' . $file->file_path) : null;
     }
 
     public function updated($name)
     {
-        $pdfPreviewFields = ['pdfStartPage', 'pdfEndPage', 'pdfStartPercentage', 'pdfEndPercentage', 'pdfFileId', 'pdfSourceType', 'pdfUpload'];
+        $pdfPreviewFields = ['pdfStartPage', 'pdfEndPage', 'pdfStartPercentage', 'pdfEndPercentage', 'pdfFileId'];
 
         if ($name === 'type' || ($this->type === 'pdf' && in_array($name, $pdfPreviewFields))) {
             $this->dispatch('pdf-preview-changed',
@@ -273,29 +292,13 @@ new #[Layout('layouts.app')] class extends Component
             $contentable->content = $this->noteText;
             $contentable->save();
         } elseif ($this->type === 'pdf') {
-            if ($this->pdfSourceType === 'upload') {
-                $this->validate([
-                    'pdfUpload' => 'required|file|mimes:pdf|max:20480',
-                    'pdfStartPage' => 'nullable|string',
-                    'pdfEndPage' => 'nullable|string',
-                ]);
+            $this->validate([
+                'pdfFileId' => ['required', $this->ownedFileRule()],
+                'pdfStartPage' => 'nullable|string',
+                'pdfEndPage' => 'nullable|string',
+            ]);
 
-                $file = File::create([
-                    'user_id' => auth()->id(),
-                    'name' => $this->pdfUpload->getClientOriginalName(),
-                    'file_path' => $this->pdfUpload->store('uploads', 'public'),
-                    'file_type' => 'pdf',
-                    'size' => $this->pdfUpload->getSize(),
-                ]);
-            } else {
-                $this->validate([
-                    'pdfFileId' => ['required', $this->ownedFileRule()],
-                    'pdfStartPage' => 'nullable|string',
-                    'pdfEndPage' => 'nullable|string',
-                ]);
-
-                $file = File::ownedBy(auth()->user())->find($this->pdfFileId);
-            }
+            $file = File::ownedBy(auth()->user())->find($this->pdfFileId);
 
             $this->validate([
                 'pdfStartPercentage' => 'nullable|integer|min:0|max:100',
@@ -396,16 +399,16 @@ new #[Layout('layouts.app')] class extends Component
 
                 $this->validate([
                     'imageSourceType' => 'required|in:file,url',
-                    'imageFileId' => ['required_if:imageSourceType,file', $this->ownedFileRule()],
-                    'imageExternalUrl' => 'required_if:imageSourceType,url',
+                    // Only the chosen source is validated — the other one is left empty on purpose.
+                    'imageFileId' => $this->imageSourceType === 'file' ? ['required', $this->ownedFileRule()] : ['nullable'],
+                    'imageExternalUrl' => $this->imageSourceType === 'url' ? ['required', 'url'] : ['nullable'],
                 ]);
-
-                $file = File::ownedBy(auth()->user())->find($this->imageFileId);
 
                 $contentable = $existingContentable ?: new ImageContent();
                 $contentable->name = $this->label;
-            
+
                 if($this->imageSourceType == 'file'){
+                    $file = File::ownedBy(auth()->user())->find($this->imageFileId);
                     $contentable->file_url = asset('storage/' . $file->file_path);
                 }else{
                     $contentable->file_url = $this->imageExternalUrl;
@@ -525,41 +528,10 @@ new #[Layout('layouts.app')] class extends Component
             </div>
         @elseif($type === 'pdf')
             <div class="mb-4">
-                <label class="block text-sm font-medium text-gray-700 mb-2">PDF Source</label>
-                <div class="flex gap-4 mb-3">
-                    <label class="inline-flex items-center cursor-pointer">
-                        <input type="radio" wire:model.live="pdfSourceType" value="existing" class="form-radio text-indigo-600">
-                        <span class="ml-2 text-sm text-gray-700 font-medium">Choose Existing File</span>
-                    </label>
-                    <label class="inline-flex items-center cursor-pointer">
-                        <input type="radio" wire:model.live="pdfSourceType" value="upload" class="form-radio text-indigo-600">
-                        <span class="ml-2 text-sm text-gray-700 font-medium">Upload New PDF</span>
-                    </label>
-                </div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">PDF File</label>
+                <x-file-picker model="pdfFileId" kind="pdf" :files="$this->pdfFiles" :live="true" />
+                @error('pdfFileId') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
             </div>
-
-            @if($pdfSourceType === 'existing')
-                <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Select PDF File</label>
-                    <select wire:model.live="pdfFileId" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;">
-                        <option value="">-- Choose a PDF --</option>
-                        @foreach($pdfFiles as $file)
-                            <option value="{{ $file->id }}">{{ $file->name }}</option>
-                        @endforeach
-                    </select>
-                    @error('pdfFileId') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
-                </div>
-            @else
-                <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Upload PDF</label>
-                    <input type="file" wire:model="pdfUpload" accept="application/pdf" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;">
-                    <div wire:loading wire:target="pdfUpload" class="text-xs text-indigo-600 mt-1">Uploading&hellip;</div>
-                    @error('pdfUpload') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
-                    @if($pdfUpload)
-                        <p class="text-xs text-gray-500 mt-1">Selected: {{ $pdfUpload->getClientOriginalName() }}</p>
-                    @endif
-                </div>
-            @endif
 
             <div class="flex gap-4 mb-4">
                 <div class="w-1/2">
@@ -610,15 +582,9 @@ new #[Layout('layouts.app')] class extends Component
 
             @if($videoSourceType === 'file')
                 <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Select Video File</label>
-                    <select wire:model="videoFileId" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;">
-                        <option value="">-- Choose a Video --</option>
-                        @foreach($videoFiles as $file)
-                            <option value="{{ $file->id }}">{{ $file->name }}</option>
-                        @endforeach
-                    </select>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Video File</label>
+                    <x-file-picker model="videoFileId" kind="video" :files="$this->videoFiles" />
                     @error('videoFileId') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
-                    <p class="text-xs text-gray-500 mt-1">If your video is not here, <a href="{{ route('files.index') }}" class="text-indigo-600 hover:underline">upload it in the File Manager</a> first.</p>
                 </div>
 
       
@@ -672,16 +638,9 @@ new #[Layout('layouts.app')] class extends Component
 
             @if($imageSourceType == 'file')
             <div class="mb-4">
-                <label class="block text-sm font-medium text-gray-700 mb-1">Select Image File</label>
-                <select wire:model="imageFileId" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;">
-                    <option value="">-- Choose an Image --</option>
-                    @foreach($imageFiles as $file)
-                        <option value="{{ $file->id }}">{{ $file->name }}</option>
-                    @endforeach
-                </select>
-                
+                <label class="block text-sm font-medium text-gray-700 mb-1">Image File</label>
+                <x-file-picker model="imageFileId" kind="image" :files="$this->imageFiles" />
                 @error('imageFileId') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
-                <p class="text-xs text-gray-500 mt-1">If your image is not here, <a href="{{ route('files.index') }}" class="text-indigo-600 hover:underline">upload it in the File Manager</a> first.</p>
             </div>
             @else
                 <div class="mb-4">

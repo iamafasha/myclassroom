@@ -179,10 +179,10 @@ it('offers only your own files when building content', function () {
     $theirs = File::create(['user_id' => $other->id, 'name' => 'Their Slides', 'file_path' => 'uploads/theirs.pdf', 'file_type' => 'pdf']);
 
     $form = Livewire::actingAs($owner)->test('create-content-form', ['moduleContentId' => $moduleContent->id]);
-    expect(collect($form->get('pdfFiles'))->pluck('name')->all())->toBe(['My Slides']);
+    expect(collect($form->instance()->pdfFiles)->pluck('name')->all())->toBe(['My Slides']);
 
     // Picking a file you do not own is rejected server-side.
-    $form->set('type', 'pdf')->set('pdfSourceType', 'existing')->set('pdfFileId', $theirs->id)
+    $form->set('type', 'pdf')->set('pdfFileId', $theirs->id)
         ->call('save')->assertHasErrors('pdfFileId');
 
     $form->set('pdfFileId', $mine->id)->call('save')->assertHasNoErrors();

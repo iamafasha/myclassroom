@@ -4,7 +4,8 @@ use Illuminate\Support\Facades\Route;
 
 
 Route::middleware('auth')->group(function () {
-    \Livewire\Volt\Volt::route('/', 'classroom-dashboard')->name('home');
+    \Livewire\Volt\Volt::route('/', 'home')->name('home');
+    \Livewire\Volt\Volt::route('/dashboard', 'classroom-dashboard')->name('dashboard');
     \Livewire\Volt\Volt::route('/classes', 'classes.index')->name('classes.index');
     \Livewire\Volt\Volt::route('/classes/{classroom}', 'classes.show')->name('classes.show');
     \Livewire\Volt\Volt::route('/classes/{classroom}/courses/add', 'classes.courses-add')->name('classes.courses.add');
@@ -37,7 +38,8 @@ Route::middleware('auth')->group(function () {
             'size' => $upload->getSize(),
         ]);
 
-        return response()->json(['id' => $file->id, 'name' => $file->name]);
+        // The full picker shape, so a file uploaded inline can be rendered without another round trip.
+        return response()->json($file->pickerEntry());
     })->name('files.upload');
 
     Route::get('/live-class/{liveClass}/calendar.ics', function (App\Models\LiveClassContent $liveClass) {

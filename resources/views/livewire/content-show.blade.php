@@ -194,6 +194,50 @@ new #[Layout('layouts.app')] class extends Component
         return (bool) $this->moduleContent?->module?->course?->isManagedBy(auth()->user());
     }
 
+    /**
+     * The next lesson in the course: the following content in this module,
+     * or the first content of the next module once this module runs out.
+     */
+    #[\Livewire\Attributes\Computed]
+    public function nextModuleContent()
+    {
+        $module = $this->moduleContent?->module;
+
+        if (! $module) {
+            return null;
+        }
+
+        $next = \App\Models\ModuleContent::where('module_id', $module->id)
+            ->where(function ($query) {
+                $query->where('sort_order', '>', $this->moduleContent->sort_order)
+                    ->orWhere(function ($tie) {
+                        $tie->where('sort_order', $this->moduleContent->sort_order)
+                            ->where('id', '>', $this->moduleContent->id);
+                    });
+            })
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->first();
+
+        if ($next) {
+            return $next;
+        }
+
+        $nextModule = \App\Models\Module::where('course_id', $module->course_id)
+            ->where(function ($query) use ($module) {
+                $query->where('sort_order', '>', $module->sort_order)
+                    ->orWhere(function ($tie) use ($module) {
+                        $tie->where('sort_order', $module->sort_order)
+                            ->where('id', '>', $module->id);
+                    });
+            })
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->first();
+
+        return $nextModule?->moduleContents()->first();
+    }
+
     /** Editing contents, ordering them and reading everyone's submissions is the owner's job. */
     private function authorizeManage()
     {
@@ -469,9 +513,47 @@ new #[Layout('layouts.app')] class extends Component
                     $youtubeId = getYoutubeId($videoUrl);
                 @endphp
 
+                @once
+                    <style>
+                        /* Keep the frame inside the viewport, letterboxing rather than cropping or overflowing. */
+                        .video-frame { width: 100%; max-width: calc(70vh * 16 / 9); margin: 0 auto; }
+                        .video-frame-inner { position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); border: 1px solid #E5E7EB; background: #000; }
+                        .video-frame-inner > * { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+
+                        .video-player { position: relative; width: 100%; max-height: 70vh; margin: 0 auto; background: #000; border-radius: 8px; overflow: hidden; border: 1px solid #E5E7EB; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); display: flex; align-items: center; justify-content: center; outline: none; }
+                        .video-player video { display: block; width: 100%; max-height: 70vh; object-fit: contain; background: #000; }
+
+                        /* Fullscreen: fill the screen, drop the page chrome, let the video use the full height. */
+                        .video-player:fullscreen, .video-player:-webkit-full-screen { max-height: none; width: 100vw; height: 100vh; border: none; border-radius: 0; }
+                        .video-player:fullscreen video, .video-player:-webkit-full-screen video { max-height: 100vh; height: 100vh; }
+                        .video-player:fullscreen .video-player-controls, .video-player:-webkit-full-screen .video-player-controls { padding: 18px 28px; }
+
+                        .video-player-controls { position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(to top, rgba(0,0,0,0.85), rgba(0,0,0,0)); padding: 24px 14px 10px; display: flex; flex-direction: column; gap: 6px; transition: opacity 0.2s ease; }
+                        .video-player.is-idle .video-player-controls { opacity: 0; pointer-events: none; }
+                        .video-player.is-idle { cursor: none; }
+                        .video-player-row { display: flex; align-items: center; gap: 12px; }
+                        .video-player-controls button { background: none; border: none; color: #ffffff; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 4px; }
+                        .video-player-controls button:hover { color: #C7D2FE; }
+                        .video-player-controls button:focus-visible { outline: 2px solid #C7D2FE; outline-offset: 2px; }
+                        .video-player-seek { width: 100%; cursor: pointer; accent-color: #4F46E5; height: 4px; }
+                        .video-player-time { color: #ffffff; font-size: 13px; font-family: monospace; white-space: nowrap; }
+                        .video-player-spacer { flex: 1; }
+                        .video-player-speed { color: #ffffff; font-size: 13px; font-weight: 700; min-width: 34px; }
+                        .video-player-volume-wrap { display: flex; align-items: center; gap: 6px; }
+                        .video-player-volume { width: 0; opacity: 0; height: 4px; accent-color: #4F46E5; cursor: pointer; transition: width 0.2s ease, opacity 0.2s ease; }
+                        .video-player-volume-wrap:hover .video-player-volume,
+                        .video-player-volume-wrap:focus-within .video-player-volume { width: 70px; opacity: 1; }
+                        @media (max-width: 640px) {
+                            .video-player-volume-wrap:hover .video-player-volume { width: 0; opacity: 0; }
+                        }
+                    </style>
+                @endonce
+
                 @if($youtubeId)
-                    <div style="position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); border: 1px solid #E5E7EB; background: #000;">
-                        <div id="yt-player-{{ $uid }}" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
+                    <div class="video-frame">
+                        <div class="video-frame-inner">
+                            <div id="yt-player-{{ $uid }}"></div>
+                        </div>
                     </div>
 
                     @once
@@ -488,10 +570,16 @@ new #[Layout('layouts.app')] class extends Component
                                         'end': ytEndSec ? ytEndSec : undefined,
                                         'rel': 0,
                                         'modestbranding': 1,
-                                        'enablejsapi': 1
+                                        'enablejsapi': 1,
+                                        'fs': 1
                                     },
                                     events: {
                                         'onReady': function(event) {
+                                            const iframe = player.getIframe();
+                                            if (iframe) {
+                                                iframe.setAttribute('allowfullscreen', '');
+                                                iframe.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen');
+                                            }
                                             if (ytStartSec) {
                                                 player.seekTo(ytStartSec, true);
                                             }
@@ -559,36 +647,82 @@ new #[Layout('layouts.app')] class extends Component
                         })();
                     </script>
                 @else
-                    <div style="border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); border: 1px solid #E5E7EB; background: #000; position: relative;" id="video-container-{{ $uid }}">
-                        <video id="course-video-{{ $uid }}" width="100%" style="display: block;">
-                            <source src="{{ $videoUrl }}" type="video/mp4">
+                    <div class="video-player" id="video-container-{{ $uid }}" tabindex="0">
+                        <video id="course-video-{{ $uid }}" playsinline preload="metadata">
+                            <source src="{{ $videoUrl }}">
                             Your browser does not support the video tag.
                         </video>
 
                         <!-- Custom Controls -->
-                        <div id="video-controls-{{ $uid }}" style="position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); padding: 10px 15px; display: flex; align-items: center; gap: 15px;">
-                            <button id="play-pause-{{ $uid }}" style="background: none; border: none; color: white; cursor: pointer; padding: 0; display: flex; align-items: center;">
-                                <!-- Play Icon -->
-                                <svg id="icon-play-{{ $uid }}" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                                <!-- Pause Icon (hidden) -->
-                                <svg id="icon-pause-{{ $uid }}" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 24 24" style="display:none;"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-                            </button>
-                            <input type="range" id="seek-bar-{{ $uid }}" value="0" min="0" max="100" style="flex: 1; cursor: pointer;">
-                            <span id="time-display-{{ $uid }}" style="color: white; font-size: 13px; font-family: monospace;">00:00 / 00:00</span>
+                        <div class="video-player-controls" id="video-controls-{{ $uid }}">
+                            <input type="range" class="video-player-seek" data-role="seek" value="0" min="0" max="100" step="0.1" aria-label="Seek">
+
+                            <div class="video-player-row">
+                                <button type="button" data-role="play" title="Play/pause (space)" aria-label="Play">
+                                    <svg data-role="icon-play" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                                    <svg data-role="icon-pause" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 24 24" style="display:none;"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                                </button>
+
+                                <div class="video-player-volume-wrap">
+                                    <button type="button" data-role="mute" title="Mute (m)" aria-label="Mute">
+                                        <svg data-role="icon-volume" xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 7.97v8.06A4.47 4.47 0 0016.5 12zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+                                        <svg data-role="icon-muted" xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="currentColor" viewBox="0 0 24 24" style="display:none;"><path d="M16.5 12A4.5 4.5 0 0014 7.97v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.8 8.8 0 0021 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 003.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+                                    </button>
+                                    <input type="range" class="video-player-volume" data-role="volume" min="0" max="1" step="0.05" value="1" aria-label="Volume">
+                                </div>
+
+                                <button type="button" data-role="back" title="Back 10 seconds (←)" aria-label="Back 10 seconds">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="currentColor" viewBox="0 0 24 24"><path d="M12.5 8V5l-4 4 4 4v-3c2.76 0 5 2.24 5 5s-2.24 5-5 5-5-2.24-5-5h-2c0 3.87 3.13 7 7 7s7-3.13 7-7-3.13-7-7-7z"/><text x="11" y="20" font-size="8" font-weight="bold" fill="currentColor" text-anchor="middle">10</text></svg>
+                                </button>
+
+                                <span class="video-player-time" data-role="time">00:00 / 00:00</span>
+
+                                <button type="button" data-role="forward" title="Forward 10 seconds (→)" aria-label="Forward 10 seconds">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="currentColor" viewBox="0 0 24 24"><path d="M11.5 8V5l4 4-4 4v-3c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5h2c0 3.87-3.13 7-7 7s-7-3.13-7-7 3.13-7 7-7z"/><text x="13" y="20" font-size="8" font-weight="bold" fill="currentColor" text-anchor="middle">10</text></svg>
+                                </button>
+
+                                <span class="video-player-spacer"></span>
+
+                                <button type="button" data-role="speed" class="video-player-speed" title="Playback speed" aria-label="Playback speed">1x</button>
+
+                                <button type="button" data-role="pip" title="Picture in picture" aria-label="Picture in picture" style="display:none;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" fill="currentColor" viewBox="0 0 24 24"><path d="M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z"/></svg>
+                                </button>
+
+                                <button type="button" data-role="fullscreen" title="Fullscreen (f)" aria-label="Fullscreen">
+                                    <svg data-role="icon-expand" xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="currentColor" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+                                    <svg data-role="icon-collapse" xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="currentColor" viewBox="0 0 24 24" style="display:none;"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>
+                                </button>
+                            </div>
                         </div>
                     </div>
 
                     <script>
-                        document.addEventListener("DOMContentLoaded", function() {
+                        (function() {
+                            const container = document.getElementById('video-container-{{ $uid }}');
                             const video = document.getElementById('course-video-{{ $uid }}');
-                            const playPauseBtn = document.getElementById('play-pause-{{ $uid }}');
-                            const iconPlay = document.getElementById('icon-play-{{ $uid }}');
-                            const iconPause = document.getElementById('icon-pause-{{ $uid }}');
-                            const seekBar = document.getElementById('seek-bar-{{ $uid }}');
-                            const timeDisplay = document.getElementById('time-display-{{ $uid }}');
+                            if (!container || !video || container.dataset.playerReady) return;
+                            container.dataset.playerReady = '1';
 
+                            const el = role => container.querySelector('[data-role="' + role + '"]');
+                            const seekBar = el('seek');
+                            const timeDisplay = el('time');
+                            const iconPlay = el('icon-play');
+                            const iconPause = el('icon-pause');
+                            const iconVolume = el('icon-volume');
+                            const iconMuted = el('icon-muted');
+                            const iconExpand = el('icon-expand');
+                            const iconCollapse = el('icon-collapse');
+                            const volumeSlider = el('volume');
+                            const speedBtn = el('speed');
+                            const pipBtn = el('pip');
+
+                            // The content can be clipped to a section of the source video.
                             let startSec = {{ $startSeconds ?? 'null' }};
                             let endSec = {{ $endSeconds ?? 'null' }};
+
+                            const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+                            let idleTimer = null;
 
                             function formatTime(seconds) {
                                 if (isNaN(seconds)) return "00:00";
@@ -597,13 +731,12 @@ new #[Layout('layouts.app')] class extends Component
                                 return (m < 10 ? "0" + m : m) + ":" + (s < 10 ? "0" + s : s);
                             }
 
-                            video.addEventListener('loadedmetadata', function() {
-                                if (startSec === null) startSec = 0;
-                                if (endSec === null || endSec > video.duration) endSec = video.duration;
-
-                                video.currentTime = startSec;
-                                updateDisplay();
-                            });
+                            function showPlaying(playing) {
+                                iconPlay.style.display = playing ? 'none' : 'block';
+                                iconPause.style.display = playing ? 'block' : 'none';
+                                el('play').setAttribute('aria-label', playing ? 'Pause' : 'Play');
+                                if (!playing) wake(false);
+                            }
 
                             function updateDisplay() {
                                 if (startSec === null) return;
@@ -615,18 +748,38 @@ new #[Layout('layouts.app')] class extends Component
                                 timeDisplay.textContent = formatTime(currentRel) + " / " + formatTime(durationRel);
                             }
 
-                            playPauseBtn.addEventListener('click', function() {
+                            video.addEventListener('loadedmetadata', function() {
+                                if (startSec === null) startSec = 0;
+                                if (endSec === null || endSec > video.duration) endSec = video.duration;
+
+                                video.currentTime = startSec;
+                                updateDisplay();
+                            });
+
+                            function togglePlay() {
                                 if (video.paused) {
                                     if (video.currentTime >= endSec) video.currentTime = startSec;
                                     video.play();
-                                    iconPlay.style.display = 'none';
-                                    iconPause.style.display = 'block';
                                 } else {
                                     video.pause();
-                                    iconPlay.style.display = 'block';
-                                    iconPause.style.display = 'none';
                                 }
-                            });
+                            }
+
+                            function skip(seconds) {
+                                const target = video.currentTime + seconds;
+                                video.currentTime = Math.min(Math.max(target, startSec ?? 0), endSec ?? video.duration);
+                                updateDisplay();
+                            }
+
+                            video.addEventListener('play', () => showPlaying(true));
+                            video.addEventListener('pause', () => showPlaying(false));
+                            video.addEventListener('ended', () => showPlaying(false));
+
+                            el('play').addEventListener('click', togglePlay);
+                            video.addEventListener('click', togglePlay);
+                            video.addEventListener('dblclick', toggleFullscreen);
+                            el('back').addEventListener('click', () => skip(-10));
+                            el('forward').addEventListener('click', () => skip(10));
 
                             video.addEventListener('timeupdate', function() {
                                 if (startSec !== null && video.currentTime < startSec) {
@@ -635,21 +788,107 @@ new #[Layout('layouts.app')] class extends Component
                                 if (endSec !== null && video.currentTime >= endSec) {
                                     video.pause();
                                     video.currentTime = endSec;
-                                    iconPlay.style.display = 'block';
-                                    iconPause.style.display = 'none';
                                 }
                                 updateDisplay();
                             });
 
                             seekBar.addEventListener('input', function() {
-                                video.currentTime = startSec + parseFloat(seekBar.value);
+                                video.currentTime = (startSec ?? 0) + parseFloat(seekBar.value);
                             });
 
-                            video.addEventListener('ended', function() {
-                                iconPlay.style.display = 'block';
-                                iconPause.style.display = 'none';
+                            // Volume
+                            function showMuted() {
+                                const muted = video.muted || video.volume === 0;
+                                iconVolume.style.display = muted ? 'none' : 'block';
+                                iconMuted.style.display = muted ? 'block' : 'none';
+                                el('mute').setAttribute('aria-label', muted ? 'Unmute' : 'Mute');
+                            }
+                            el('mute').addEventListener('click', function() {
+                                video.muted = !video.muted;
+                                if (!video.muted && video.volume === 0) video.volume = 1;
+                                volumeSlider.value = video.muted ? 0 : video.volume;
+                                showMuted();
                             });
-                        });
+                            volumeSlider.addEventListener('input', function() {
+                                video.volume = parseFloat(volumeSlider.value);
+                                video.muted = video.volume === 0;
+                                showMuted();
+                            });
+
+                            // Playback speed
+                            speedBtn.addEventListener('click', function() {
+                                const next = SPEEDS[(SPEEDS.indexOf(video.playbackRate) + 1) % SPEEDS.length];
+                                video.playbackRate = next;
+                                speedBtn.textContent = next + 'x';
+                            });
+
+                            // Picture in picture, where the browser supports it
+                            if (document.pictureInPictureEnabled && !video.disablePictureInPicture) {
+                                pipBtn.style.display = 'flex';
+                                pipBtn.addEventListener('click', function() {
+                                    if (document.pictureInPictureElement) {
+                                        document.exitPictureInPicture();
+                                    } else {
+                                        video.requestPictureInPicture().catch(() => {});
+                                    }
+                                });
+                            }
+
+                            // Fullscreen
+                            function fullscreenElement() {
+                                return document.fullscreenElement || document.webkitFullscreenElement || null;
+                            }
+                            function toggleFullscreen() {
+                                if (fullscreenElement()) {
+                                    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+                                } else if (container.requestFullscreen) {
+                                    container.requestFullscreen().catch(() => {});
+                                } else if (container.webkitRequestFullscreen) {
+                                    container.webkitRequestFullscreen();
+                                } else if (video.webkitEnterFullscreen) {
+                                    // iOS Safari only goes fullscreen through its own player.
+                                    video.webkitEnterFullscreen();
+                                }
+                            }
+                            function showFullscreen() {
+                                const isFull = fullscreenElement() === container;
+                                iconExpand.style.display = isFull ? 'none' : 'block';
+                                iconCollapse.style.display = isFull ? 'block' : 'none';
+                                el('fullscreen').setAttribute('aria-label', isFull ? 'Exit fullscreen' : 'Fullscreen');
+                            }
+                            el('fullscreen').addEventListener('click', toggleFullscreen);
+                            document.addEventListener('fullscreenchange', showFullscreen);
+                            document.addEventListener('webkitfullscreenchange', showFullscreen);
+
+                            // Hide the controls while playing and untouched, so the video is unobstructed.
+                            function wake(scheduleHide) {
+                                container.classList.remove('is-idle');
+                                clearTimeout(idleTimer);
+                                if (scheduleHide !== false && !video.paused) {
+                                    idleTimer = setTimeout(() => container.classList.add('is-idle'), 2500);
+                                }
+                            }
+                            container.addEventListener('mousemove', () => wake(true));
+                            container.addEventListener('mouseleave', () => { if (!video.paused) container.classList.add('is-idle') });
+                            container.addEventListener('touchstart', () => wake(true), { passive: true });
+
+                            // Keyboard shortcuts once the player has focus.
+                            container.addEventListener('keydown', function(event) {
+                                const key = event.key.toLowerCase();
+                                if ([' ', 'k', 'f', 'm', 'arrowleft', 'arrowright'].includes(key)) event.preventDefault();
+
+                                if (key === ' ' || key === 'k') togglePlay();
+                                else if (key === 'f') toggleFullscreen();
+                                else if (key === 'm') el('mute').click();
+                                else if (key === 'arrowleft') skip(-10);
+                                else if (key === 'arrowright') skip(10);
+                                wake(true);
+                            });
+
+                            showMuted();
+                            showFullscreen();
+                            updateDisplay();
+                        })();
                     </script>
                 @endif
             @elseif($type === 'LinkContent')
@@ -972,7 +1211,7 @@ new #[Layout('layouts.app')] class extends Component
             </div>
         @endforelse
 
-        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #E5E7EB; display: flex; justify-content: flex-end;">
+        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #E5E7EB; display: flex; justify-content: flex-end; align-items: center; gap: 12px; flex-wrap: wrap;">
             <form action="{{ route('content.toggle-complete', $moduleContent->id) }}" method="POST">
                 @csrf
                 @if($moduleContent->is_completed)
@@ -991,6 +1230,20 @@ new #[Layout('layouts.app')] class extends Component
                     </button>
                 @endif
             </form>
+
+            @if($this->nextModuleContent)
+                <a href="{{ route('content.show', $this->nextModuleContent->id) }}" wire:navigate
+                   style="background-color: #EEF2FF; color: #4F46E5; border: 1px solid #C7D2FE; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; display: flex; align-items: center; gap: 8px; transition: all 0.2s;">
+                    Next: {{ \Illuminate\Support\Str::limit($this->nextModuleContent->label ?? 'Content', 32) }}
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                    </svg>
+                </a>
+            @else
+                <span style="color: #6B7280; font-size: 14px; font-weight: 600; padding: 10px 4px;">
+                    You've reached the last content in this course.
+                </span>
+            @endif
         </div>
     </div>
 
