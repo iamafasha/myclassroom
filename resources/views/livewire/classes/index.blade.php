@@ -56,6 +56,33 @@ new #[Layout('layouts.app')] class extends Component {
         unset($this->classrooms);
         session()->flash('success', 'Classroom created successfully.');
     }
+
+    /** Soft delete a class I administer; attendees and courses stay attached. */
+    public function deleteClassroom(int $classroomId)
+    {
+        $classroom = Classroom::findOrFail($classroomId);
+
+        abort_unless($classroom->isAdministeredBy(auth()->user()), 403, 'You do not manage this class.');
+
+        $classroom->delete();
+
+        unset($this->classrooms);
+        session()->flash('success', 'Class deleted successfully.');
+    }
+
+    /** Step out of a class someone else administers. */
+    public function leaveClassroom(int $classroomId)
+    {
+        $classroom = Classroom::findOrFail($classroomId);
+
+        abort_if($classroom->isAdministeredBy(auth()->user()), 403, 'Admins cannot leave their own class.');
+        abort_unless($classroom->users()->where('users.id', auth()->id())->exists(), 403, 'You are not in this class.');
+
+        $classroom->users()->detach(auth()->id());
+
+        unset($this->attendingClassrooms);
+        session()->flash('success', 'You have left the class.');
+    }
 }; ?>
 
 <div style="display: flex; width: 100%; height: 100%; overflow: hidden;">
@@ -146,14 +173,25 @@ new #[Layout('layouts.app')] class extends Component {
                                 @endforelse
                             </div>
 
-                            <div style="display: flex; align-items: center; gap: 10px; margin-top: 15px; padding-top: 15px; border-top: 1px solid #F3F4F6;">
-                                <div style="width: 32px; height: 32px; border-radius: 50%; background-color: #E0E7FF; display: flex; align-items: center; justify-content: center; color: #4338CA; font-weight: 700; font-size: 12px;">
-                                    {{ strtoupper(substr($classroom->admin->name ?? '?', 0, 1)) }}
+                            <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 15px; padding-top: 15px; border-top: 1px solid #F3F4F6;">
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <div style="width: 32px; height: 32px; border-radius: 50%; background-color: #E0E7FF; display: flex; align-items: center; justify-content: center; color: #4338CA; font-weight: 700; font-size: 12px;">
+                                        {{ strtoupper(substr($classroom->admin->name ?? '?', 0, 1)) }}
+                                    </div>
+                                    <div>
+                                        <p style="margin: 0; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #6B7280; font-weight: 600;">Class Admin</p>
+                                        <p style="margin: 0; font-size: 13px; font-weight: 500; color: #374151;">{{ $classroom->admin->name ?? 'Unknown' }}</p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <p style="margin: 0; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #6B7280; font-weight: 600;">Class Admin</p>
-                                    <p style="margin: 0; font-size: 13px; font-weight: 500; color: #374151;">{{ $classroom->admin->name ?? 'Unknown' }}</p>
-                                </div>
+                                <button type="button" wire:click="leaveClassroom({{ $classroom->id }})"
+                                        wire:confirm="Leave &quot;{{ $classroom->title }}&quot;? You will lose access to its courses."
+                                        style="display: inline-flex; align-items: center; gap: 6px; background: white; border: 1px solid #FECACA; color: #DC2626; font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 8px; cursor: pointer; transition: background-color 0.2s;"
+                                        onmouseover="this.style.backgroundColor='#FEF2F2'" onmouseout="this.style.backgroundColor='white'">
+                                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+                                    </svg>
+                                    Leave
+                                </button>
                             </div>
                         </div>
                     @endforeach
@@ -170,16 +208,29 @@ new #[Layout('layouts.app')] class extends Component {
         @else
             <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px;">
                 @foreach($this->classrooms as $classroom)
-                    <a href="{{ route('classes.show', $classroom->id) }}" wire:navigate style="display: block; text-decoration: none; border: 1px solid #E5E7EB; border-radius: 12px; padding: 20px; transition: box-shadow 0.2s, border-color 0.2s; background: white;" 
-                         onmouseover="this.style.boxShadow='0 4px 6px -1px rgba(0,0,0,0.1)'; this.style.borderColor='#93C5FD';" 
+                    <div style="border: 1px solid #E5E7EB; border-radius: 12px; padding: 20px; transition: box-shadow 0.2s, border-color 0.2s; background: white;"
+                         onmouseover="this.style.boxShadow='0 4px 6px -1px rgba(0,0,0,0.1)'; this.style.borderColor='#93C5FD';"
                          onmouseout="this.style.boxShadow='none'; this.style.borderColor='#E5E7EB';">
-                        
-                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px;">
-                            <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: #111827;">{{ $classroom->title }}</h3>
-                            <span class="badge" style="background-color: #EFF6FF; color: #2563EB; border: 1px solid #BFDBFE;">Active</span>
+
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 15px;">
+                            <a href="{{ route('classes.show', $classroom->id) }}" wire:navigate style="text-decoration: none; flex: 1; min-width: 0;">
+                                <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: #111827;">{{ $classroom->title }}</h3>
+                            </a>
+                            <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+                                <span class="badge" style="background-color: #EFF6FF; color: #2563EB; border: 1px solid #BFDBFE;">Active</span>
+                                <button type="button" wire:click="deleteClassroom({{ $classroom->id }})"
+                                        wire:confirm="Delete &quot;{{ $classroom->title }}&quot;? Attendees will lose access to its courses."
+                                        title="Delete class"
+                                        style="background: none; border: none; cursor: pointer; color: #EF4444; padding: 4px; line-height: 0; opacity: 0.6; transition: opacity 0.2s;"
+                                        onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'">
+                                    <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
-                        
-                        <div style="display: flex; align-items: center; gap: 16px; margin-top: 15px; padding-top: 15px; border-top: 1px solid #F3F4F6;">
+
+                        <a href="{{ route('classes.show', $classroom->id) }}" wire:navigate style="display: flex; text-decoration: none; align-items: center; gap: 16px; margin-top: 15px; padding-top: 15px; border-top: 1px solid #F3F4F6;">
                             <span style="font-size: 12px; color: #6B7280; display: flex; align-items: center; gap: 5px;">
                                 <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"></path>
@@ -192,8 +243,8 @@ new #[Layout('layouts.app')] class extends Component {
                                 </svg>
                                 {{ $classroom->courses_count }} course(s)
                             </span>
-                        </div>
-                    </a>
+                        </a>
+                    </div>
                 @endforeach
             </div>
         @endif

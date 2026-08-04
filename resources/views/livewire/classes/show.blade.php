@@ -60,6 +60,18 @@ new #[Layout('layouts.app')] class extends Component {
         $this->classroom->courses()->detach($courseId);
         session()->flash('success_course', 'Course removed successfully.');
     }
+
+    /** Soft delete the class; attendees and courses stay attached. */
+    public function deleteClassroom()
+    {
+        abort_unless($this->classroom->isAdministeredBy(auth()->user()), 403, 'You do not manage this class.');
+
+        $this->classroom->delete();
+
+        session()->flash('success', 'Class deleted successfully.');
+
+        return $this->redirect(route('classes.index'), navigate: true);
+    }
 }; ?>
 
 <div style="display: flex; flex-direction: column; width: 100%; height: 100%; overflow-y: auto; background-color: #F9FAFB;">
@@ -90,7 +102,18 @@ new #[Layout('layouts.app')] class extends Component {
                     </span>
                 </div>
             </div>
-            <span class="badge" style="background-color: #EFF6FF; color: #2563EB; border: 1px solid #BFDBFE; font-size: 12px; padding: 4px 12px;">Active Class</span>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <span class="badge" style="background-color: #EFF6FF; color: #2563EB; border: 1px solid #BFDBFE; font-size: 12px; padding: 4px 12px;">Active Class</span>
+                <button type="button" wire:click="deleteClassroom"
+                        wire:confirm="Delete &quot;{{ $classroom->title }}&quot;? Attendees will lose access to its courses."
+                        style="display: inline-flex; align-items: center; gap: 6px; background: white; border: 1px solid #FECACA; color: #DC2626; font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 8px; cursor: pointer; transition: background-color 0.2s;"
+                        onmouseover="this.style.backgroundColor='#FEF2F2'" onmouseout="this.style.backgroundColor='white'">
+                    <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                    </svg>
+                    Delete Class
+                </button>
+            </div>
         </div>
     </div>
 
