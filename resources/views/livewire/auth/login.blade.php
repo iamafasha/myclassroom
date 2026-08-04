@@ -19,6 +19,13 @@ new #[Layout('layouts.guest')] class extends Component {
     {
         $this->validate();
 
+        // Someone who was invited but never signed up has no password to check against.
+        if (\App\Models\User::pendingInvites()->where('email', strtolower(trim($this->email)))->exists()) {
+            throw ValidationException::withMessages([
+                'email' => 'You were invited but haven\'t finished creating your account yet. Set a password to finish signing up.',
+            ]);
+        }
+
         if (! Auth::attempt(['email' => $this->email, 'password' => $this->password], $this->remember)) {
             throw ValidationException::withMessages([
                 'email' => trans('auth.failed'),

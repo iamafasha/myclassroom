@@ -15,6 +15,15 @@ new #[Layout('layouts.guest')] class extends Component {
     {
         $this->validate();
 
+        // An invitation that was never completed has no password to reset — those people
+        // finish signing up instead, so they are answered like any unknown address.
+        if (\App\Models\User::pendingInvites()->where('email', strtolower(trim($this->email)))->exists()) {
+            $this->status = __(Password::RESET_LINK_SENT);
+            $this->reset('email');
+
+            return;
+        }
+
         $status = Password::sendResetLink(['email' => $this->email]);
 
         // An unknown address is answered exactly like a known one, so the form can't be

@@ -1346,7 +1346,7 @@ new #[Layout('layouts.app')] class extends Component
                                 <tr style="border-bottom: 1px solid #F3F4F6; {{ $rowUser->id === auth()->id() ? 'background: #FAFAFF;' : '' }}">
                                     <td style="padding: 12px 24px; vertical-align: top;">
                                         <div style="font-weight: 600; color: #111827;">
-                                            {{ $rowUser->name }}
+                                            {{ $rowUser->displayName() }}
                                             @if($rowUser->id === auth()->id())
                                                 <span style="font-size: 0.7rem; font-weight: 600; color: #4F46E5; background: #EEF2FF; border: 1px solid #C7D2FE; padding: 1px 6px; border-radius: 9999px; margin-left: 4px;">You</span>
                                             @endif

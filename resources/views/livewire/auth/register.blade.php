@@ -4,32 +4,61 @@ use App\Models\User;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\Rules;
-use Livewire\Attributes\Validate;
+use Illuminate\Validation\Rule;
+use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Volt\Component;
 
 new #[Layout('layouts.guest')] class extends Component {
-    #[Validate('required|string|max:255')]
     public string $name = '';
 
-    #[Validate('required|string|lowercase|email|max:255|unique:'.User::class)]
     public string $email = '';
 
-    #[Validate('required|string|confirmed|min:8')]
     public string $password = '';
 
     public string $password_confirmation = '';
+
+    /** Invitations link here with the address already filled in. */
+    public function mount(?string $email = null): void
+    {
+        $this->email = strtolower(trim($email ?? request()->string('email')->toString()));
+    }
+
+    /**
+     * An invited address already has a row waiting for it, so it is only "taken" once
+     * somebody has actually finished signing up with it.
+     */
+    protected function rules(): array
+    {
+        return [
+            'name' => ['required', 'string', 'max:255'],
+            'email' => [
+                'required', 'string', 'lowercase', 'email', 'max:255',
+                Rule::unique(User::class)->whereNotNull('password'),
+            ],
+            'password' => ['required', 'string', 'confirmed', 'min:8'],
+        ];
+    }
+
+    #[Computed]
+    public function invite()
+    {
+        return User::pendingInvites()->where('email', strtolower(trim($this->email)))->first();
+    }
 
     public function register(): void
     {
         $this->validate();
 
-        $user = User::create([
+        // Finishing an invitation keeps the same row, so the classes it was added to stay.
+        $user = $this->invite ?: new User(['email' => $this->email]);
+
+        $user->fill([
             'name' => $this->name,
-            'email' => $this->email,
             'password' => Hash::make($this->password),
         ]);
+        $user->invited_at = null;
+        $user->save();
 
         event(new Registered($user));
 
@@ -40,8 +69,23 @@ new #[Layout('layouts.guest')] class extends Component {
 }; ?>
 
 <div>
-    <h2 class="text-gray-500 text-sm mb-1">Create an account</h2>
-    <h1 class="text-2xl font-bold text-gray-800 mb-8">Sign up with your email</h1>
+    @if($this->invite)
+        <h2 class="text-gray-500 text-sm mb-1">You've been invited</h2>
+        <h1 class="text-2xl font-bold text-gray-800 mb-4">Finish creating your account</h1>
+        <div class="mb-8 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
+            @php $invitedClasses = $this->invite->classrooms()->orderBy('title')->pluck('title'); @endphp
+            Pick a name and a password and you're in
+            @if($invitedClasses->isNotEmpty())
+                — {{ $invitedClasses->count() === 1 ? '"' . $invitedClasses->first() . '" is' : 'these classes are' }} already waiting for you:
+                <strong>{{ $invitedClasses->join(', ', ' and ') }}</strong>.
+            @else
+                .
+            @endif
+        </div>
+    @else
+        <h2 class="text-gray-500 text-sm mb-1">Create an account</h2>
+        <h1 class="text-2xl font-bold text-gray-800 mb-8">Sign up with your email</h1>
+    @endif
 
     <form wire:submit="register" class="space-y-6">
         <div>

@@ -3,17 +3,17 @@
 use Livewire\Volt\Component;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Computed;
-use Livewire\Attributes\Validate;
 use App\Models\Classroom;
-use App\Models\User;
 use App\Models\Course;
 
 new #[Layout('layouts.app')] class extends Component {
     
     public Classroom $classroom;
 
-    #[Validate('required|exists:users,id')]
-    public ?int $attendee_id = null;
+    /** Addresses staged as chips, waiting to be invited. */
+    public array $inviteEmails = [];
+
+    public string $inviteInput = '';
 
     public function mount(Classroom $classroom)
     {
@@ -23,16 +23,90 @@ new #[Layout('layouts.app')] class extends Component {
     }
 
     #[Computed]
-    public function availableUsers()
-    {
-        $existingUserIds = $this->classroom->users()->pluck('users.id')->toArray();
-        return User::whereNotIn('id', $existingUserIds)->orderBy('name')->get();
-    }
-
-    #[Computed]
     public function attendees()
     {
-        return $this->classroom->users()->orderBy('name')->get();
+        return $this->classroom->users()->orderBy('name')->orderBy('email')->get();
+    }
+
+    /**
+     * Turns whatever is in the box into chips. Accepts one address or a pasted list
+     * separated by commas, semicolons, spaces or newlines.
+     */
+    public function stageEmails(): void
+    {
+        $this->resetValidation('inviteInput');
+
+        $candidates = preg_split('/[\s,;]+/', $this->inviteInput, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $rejected = [];
+
+        foreach ($candidates as $candidate) {
+            $email = strtolower(trim($candidate));
+
+            if (! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $rejected[] = $candidate;
+
+                continue;
+            }
+
+            if (! in_array($email, $this->inviteEmails, true)) {
+                $this->inviteEmails[] = $email;
+            }
+        }
+
+        $this->inviteInput = implode(' ', $rejected);
+
+        if ($rejected) {
+            $this->addError('inviteInput', count($rejected) === 1
+                ? '"' . $rejected[0] . '" is not a valid email address.'
+                : 'These are not valid email addresses: ' . implode(', ', $rejected) . '.');
+        }
+    }
+
+    public function removeEmail(string $email): void
+    {
+        $this->inviteEmails = array_values(array_filter(
+            $this->inviteEmails,
+            fn ($staged) => $staged !== $email
+        ));
+    }
+
+    public function sendInvites(): void
+    {
+        abort_unless($this->classroom->isAdministeredBy(auth()->user()), 403, 'You do not manage this class.');
+
+        // Anything still being typed counts as one more address.
+        if (trim($this->inviteInput) !== '') {
+            $this->stageEmails();
+        }
+
+        if (! $this->inviteEmails) {
+            $this->addError('inviteInput', 'Enter at least one email address to invite.');
+
+            return;
+        }
+
+        $counts = ['added' => 0, 'invited' => 0, 'already' => 0];
+
+        foreach ($this->inviteEmails as $email) {
+            $result = $this->classroom->inviteByEmail($email, auth()->user());
+            $counts[$result['status']]++;
+        }
+
+        $this->reset('inviteEmails', 'inviteInput');
+        unset($this->attendees);
+
+        $parts = [];
+        if ($counts['added']) {
+            $parts[] = $counts['added'] . ' existing ' . str('member')->plural($counts['added']) . ' added';
+        }
+        if ($counts['invited']) {
+            $parts[] = $counts['invited'] . ' ' . str('invitation')->plural($counts['invited']) . ' sent';
+        }
+        if ($counts['already']) {
+            $parts[] = $counts['already'] . ' already in this class';
+        }
+
+        session()->flash('success_attendee', ucfirst(implode(', ', $parts)) . '.');
     }
 
     #[Computed]
@@ -169,29 +243,55 @@ new #[Layout('layouts.app')] class extends Component {
                     </div>
                 @endif
                 
-                <form wire:submit="addAttendee" style="display: flex; gap: 10px; margin-bottom: 30px;">
-                    <div style="flex: 1;">
-                        <select wire:model="attendee_id" class="select-styled" style="width: 100%;">
-                            <option value="">Select a user to add...</option>
-                            @foreach($this->availableUsers as $user)
-                                <option value="{{ $user->id }}">{{ $user->name }} ({{ $user->email }})</option>
-                            @endforeach
-                        </select>
-                        @error('attendee_id') <span style="color: #EF4444; font-size: 11px; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
+                <form wire:submit="sendInvites" style="margin-bottom: 30px;">
+                    <label style="display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px;">Invite by email</label>
+
+                    {{-- Chips plus a free-text box, so a pasted list of addresses works as well as one at a time. --}}
+                    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; border: 1px solid #D1D5DB; border-radius: 8px; padding: 8px; background: white;">
+                        @foreach($inviteEmails as $email)
+                            <span style="display: inline-flex; align-items: center; gap: 6px; background: #EEF2FF; border: 1px solid #C7D2FE; color: #3730A3; border-radius: 9999px; padding: 4px 6px 4px 10px; font-size: 12px; font-weight: 600;">
+                                {{ $email }}
+                                <button type="button" wire:click="removeEmail('{{ $email }}')" title="Remove {{ $email }}"
+                                        style="display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: none; border-radius: 9999px; background: #C7D2FE; color: #3730A3; font-size: 11px; line-height: 1; cursor: pointer;">&times;</button>
+                            </span>
+                        @endforeach
+
+                        <input type="text" wire:model="inviteInput"
+                               wire:keydown.enter.prevent="stageEmails"
+                               wire:keydown.tab="stageEmails"
+                               wire:blur="stageEmails"
+                               placeholder="{{ $inviteEmails ? 'Add another…' : 'name@example.com, someone@else.com' }}"
+                               style="flex: 1; min-width: 200px; border: none; outline: none; padding: 4px; font-size: 13px; color: #111827; background: transparent;">
                     </div>
-                    <button type="submit" class="btn-solve" style="background-color: #4F46E5; padding: 10px 20px;">Add</button>
+
+                    <p style="margin: 6px 0 0; font-size: 11px; color: #6B7280;">
+                        Press Enter after each address. People without an account are emailed an invitation and join this class as soon as they finish signing up.
+                    </p>
+                    @error('inviteInput') <span style="color: #EF4444; font-size: 11px; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
+
+                    <button type="submit" class="btn-solve" style="background-color: #4F46E5; padding: 10px 20px; margin-top: 12px;">
+                        <span wire:loading.remove wire:target="sendInvites">Send invites</span>
+                        <span wire:loading wire:target="sendInvites">Sending…</span>
+                    </button>
                 </form>
 
                 <div style="display: flex; flex-direction: column; gap: 10px; max-height: 400px; overflow-y: auto;">
                     @forelse($this->attendees as $attendee)
                         <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px; background: #F9FAFB; border: 1px solid #F3F4F6; border-radius: 8px;">
                             <div style="display: flex; align-items: center; gap: 12px;">
-                                <div style="width: 36px; height: 36px; border-radius: 50%; background-color: #E0E7FF; display: flex; align-items: center; justify-content: center; color: #4338CA; font-weight: 700; font-size: 14px;">
-                                    {{ strtoupper(substr($attendee->name, 0, 1)) }}
+                                <div style="width: 36px; height: 36px; border-radius: 50%; background-color: {{ $attendee->isPendingInvite() ? '#FEF3C7' : '#E0E7FF' }}; display: flex; align-items: center; justify-content: center; color: {{ $attendee->isPendingInvite() ? '#B45309' : '#4338CA' }}; font-weight: 700; font-size: 14px;">
+                                    {{ strtoupper(substr($attendee->displayName(), 0, 1)) }}
                                 </div>
                                 <div>
-                                    <p style="margin: 0; font-weight: 600; font-size: 14px; color: #1F2937;">{{ $attendee->name }}</p>
-                                    <p style="margin: 0; font-size: 12px; color: #6B7280;">{{ $attendee->email }}</p>
+                                    <p style="margin: 0; font-weight: 600; font-size: 14px; color: #1F2937; display: flex; align-items: center; gap: 8px;">
+                                        {{ $attendee->displayName() }}
+                                        @if($attendee->isPendingInvite())
+                                            <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #B45309; background: #FEF3C7; border: 1px solid #FDE68A; border-radius: 9999px; padding: 2px 8px;">Invited</span>
+                                        @endif
+                                    </p>
+                                    <p style="margin: 0; font-size: 12px; color: #6B7280;">
+                                        {{ $attendee->email }}@if($attendee->isPendingInvite()) · hasn't finished signing up @endif
+                                    </p>
                                 </div>
                             </div>
                             <button wire:click="removeAttendee({{ $attendee->id }})" wire:confirm="Are you sure you want to remove this attendee?" style="background: none; border: none; cursor: pointer; color: #EF4444; padding: 5px; opacity: 0.6; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'">

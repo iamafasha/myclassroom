@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
-#[Fillable(['name', 'email', 'password'])]
+#[Fillable(['name', 'email', 'password', 'invited_at', 'invited_by'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -26,8 +26,35 @@ class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
+            'invited_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    /**
+     * An invited person who has not signed up yet: the row exists so they can be put in a
+     * class, but there is no password to log in with until they finish registering.
+     */
+    public function isPendingInvite(): bool
+    {
+        return $this->password === null;
+    }
+
+    public function scopePendingInvites($query)
+    {
+        return $query->whereNull('password');
+    }
+
+    /** Invited people have no name until they register, so fall back to their email. */
+    public function displayName(): string
+    {
+        return $this->name ?: $this->email;
+    }
+
+    /** Whoever sent the invitation, while the account is still pending. */
+    public function invitedBy()
+    {
+        return $this->belongsTo(User::class, 'invited_by');
     }
 
     public function classrooms()

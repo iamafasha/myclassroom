@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Notifications\ClassroomInvitation;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use App\Models\User;
@@ -40,6 +41,41 @@ class Classroom extends Model
         $userId = $user instanceof User ? $user->id : $user;
 
         return $this->admin_id !== null && (int) $this->admin_id === (int) $userId;
+    }
+
+    /**
+     * Puts an email address in this class, whether or not it belongs to an account yet.
+     * Unknown addresses get a partial account they complete themselves at registration.
+     *
+     * @return string One of: added (existing account), invited (new partial account),
+     *                already (nothing to do).
+     */
+    public function inviteByEmail(string $email, User $invitedBy): array
+    {
+        $email = strtolower(trim($email));
+
+        $user = User::where('email', $email)->first();
+        $isNew = false;
+
+        if (! $user) {
+            $user = User::create([
+                'email' => $email,
+                'invited_at' => now(),
+                'invited_by' => $invitedBy->id,
+            ]);
+
+            $isNew = true;
+        }
+
+        if ($this->isAdministeredBy($user) || $this->hasMember($user)) {
+            return ['user' => $user, 'status' => 'already'];
+        }
+
+        $this->users()->attach($user->id);
+
+        $user->notify(new ClassroomInvitation($this, $invitedBy));
+
+        return ['user' => $user, 'status' => $isNew ? 'invited' : 'added'];
     }
 
     public function hasMember($user): bool
