@@ -519,6 +519,10 @@ new #[Layout('layouts.app')] class extends Component
                 ->max('sort_order') ?? 0;
 
             $moduleContent->contents()->attach($content->id, ['sort_order' => $maxOrder + 1, 'is_exercise' => $this->isExercise]);
+
+            // Announce it to the classes taking this course. Editing stays quiet:
+            // only genuinely new content is worth an email.
+            \App\Jobs\NotifyClassOfNewContent::dispatch($moduleContent->id, $content->id, auth()->id());
         }
 
         return redirect()->route('content.show', $this->moduleContentId);

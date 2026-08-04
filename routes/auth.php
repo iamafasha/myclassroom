@@ -11,10 +11,10 @@ Route::middleware('guest')->group(function () {
     Volt::route('login', 'auth.login')
         ->name('login');
 
-    Volt::route('forgot-password', 'pages.auth.forgot-password')
+    Volt::route('forgot-password', 'auth.forgot-password')
         ->name('password.request');
 
-    Volt::route('reset-password/{token}', 'pages.auth.reset-password')
+    Volt::route('reset-password/{token}', 'auth.reset-password')
         ->name('password.reset');
 });
 

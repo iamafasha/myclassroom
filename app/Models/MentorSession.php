@@ -2,8 +2,11 @@
 
 namespace App\Models;
 
+use App\Mail\MentorSessionBooked;
+use App\Support\Ics;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Mail;
 
 /**
  * A one-to-one session a student requests with the mentor who owns a course.
@@ -184,6 +187,55 @@ class MentorSession extends Model
             self::STATUS_COMPLETED => ['#ECFDF5', '#047857'],
             default => ['#F3F4F6', '#4B5563'],
         };
+    }
+
+    /**
+     * Books the session on a time and tells both sides.
+     *
+     * The only way a session becomes scheduled, so the confirmation email and its
+     * calendar invite cannot be missed by whichever screen did the booking.
+     */
+    public function book($at, ?string $meetingLink = null): static
+    {
+        $this->update([
+            'status' => self::STATUS_SCHEDULED,
+            'scheduled_at' => Carbon::parse($at),
+            'meeting_link' => $this->meeting_link ?: $meetingLink,
+        ]);
+
+        $this->loadMissing(['student', 'mentor', 'course']);
+
+        foreach ([$this->student, $this->mentor] as $recipient) {
+            if ($recipient?->email) {
+                Mail::to($recipient)->queue(new MentorSessionBooked($this, $recipient));
+            }
+        }
+
+        return $this;
+    }
+
+    /** A .ics invite for the booked slot. */
+    public function toIcs(): string
+    {
+        $description = collect([
+            $this->message,
+            $this->mentor_note,
+            filled($this->meeting_link) ? 'Join: ' . $this->meeting_link : null,
+        ])->filter()->implode("\n\n");
+
+        return Ics::calendar([
+            Ics::event(
+                uid: Ics::uid('mentor-session', $this->id),
+                start: $this->scheduled_at,
+                end: $this->endsAt(),
+                summary: $this->topic,
+                description: $description,
+                location: $this->meeting_link,
+                url: $this->meeting_link,
+                alarmMinutes: 15,
+                alarmText: $this->topic . ' starts in 15 minutes',
+            ),
+        ], prodId: '-//Classroom//Mentor Session//EN');
     }
 
     /** Prefilled Google Calendar event for a booked session. */

@@ -145,10 +145,7 @@ new #[Layout('layouts.app')] class extends Component {
             return;
         }
 
-        $session->update([
-            'status' => MentorSession::STATUS_SCHEDULED,
-            'scheduled_at' => $chosen,
-        ]);
+        $session->book($chosen);
 
         unset($this->selectedSlots[$sessionId]);
         unset($this->myRequests, $this->awaitingMyChoiceCount);

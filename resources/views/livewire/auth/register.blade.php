@@ -109,6 +109,8 @@ new #[Layout('layouts.guest')] class extends Component {
     </form>
 
     <div class="mt-8">
+        {{-- Phone and Google sign-up aren't wired up yet, so they stay out of production. --}}
+        @if(! app()->isProduction())
         <div class="relative">
             <div class="absolute inset-0 flex items-center">
                 <div class="w-full border-t border-gray-300"></div>
@@ -117,7 +119,7 @@ new #[Layout('layouts.guest')] class extends Component {
                 <span class="px-2 bg-white text-gray-500">OR</span>
             </div>
         </div>
-        
+
         <div class="mt-4 text-center">
             <p class="text-sm text-gray-500 mb-4">Register With</p>
             <div class="grid grid-cols-2 gap-3">
@@ -138,7 +140,8 @@ new #[Layout('layouts.guest')] class extends Component {
                 </button>
             </div>
         </div>
-        
+        @endif
+
         <div class="mt-6 text-center">
             <p class="text-sm text-gray-600">
                 Already have an account? <a href="{{ route('login') }}" class="font-medium text-blue-600 hover:text-blue-500" wire:navigate>Login</a>

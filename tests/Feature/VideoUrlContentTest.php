@@ -76,7 +76,8 @@ it('does not queue a download for a video picked from uploaded files', function 
         ->assertHasNoErrors()
         ->assertRedirect(route('content.show', $moduleContent->id));
 
-    Queue::assertNothingPushed();
+    // The class announcement still goes out; only the download is skipped.
+    Queue::assertNotPushed(DownloadVideoContent::class);
 });
 
 it('leaves the content on its link when the download fails', function () {

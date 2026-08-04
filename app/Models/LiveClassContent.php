@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
+use App\Support\Ics;
 use App\Traits\IsContent;
 
 class LiveClassContent extends Model
@@ -69,47 +70,25 @@ class LiveClassContent extends Model
     /** A .ics event body, importable by Google Calendar, Apple Calendar and Outlook. */
     public function toIcs(): string
     {
-        $stamp = fn ($date) => $date->copy()->utc()->format('Ymd\THis\Z');
-
         $description = collect([
             $this->description,
             $this->canJoin() ? 'Join: ' . $this->join_link : null,
         ])->filter()->implode("\n\n");
 
-        $lines = [
-            'BEGIN:VCALENDAR',
-            'VERSION:2.0',
-            'PRODID:-//Classroom//Live Class//EN',
-            'CALSCALE:GREGORIAN',
-            'METHOD:PUBLISH',
-            'BEGIN:VEVENT',
-            'UID:live-class-' . $this->id . '@' . parse_url(config('app.url'), PHP_URL_HOST),
-            'DTSTAMP:' . $stamp(now()),
-            'DTSTART:' . $stamp($this->starts_at),
-            'DTEND:' . $stamp($this->endsAt()),
-            'SUMMARY:' . $this->escapeIcsText($this->calendarTitle()),
-            'DESCRIPTION:' . $this->escapeIcsText($description),
-            'SEQUENCE:0',
-            'STATUS:CONFIRMED',
-        ];
-
-        if ($this->canJoin()) {
-            $lines[] = 'LOCATION:' . $this->escapeIcsText($this->join_link);
-            $lines[] = 'URL:' . $this->escapeIcsText($this->join_link);
-        }
-
-        // A 15 minute heads-up, the same nudge the dashboard badge gives.
-        $lines = array_merge($lines, [
-            'BEGIN:VALARM',
-            'TRIGGER:-PT15M',
-            'ACTION:DISPLAY',
-            'DESCRIPTION:' . $this->escapeIcsText($this->calendarTitle() . ' starts in 15 minutes'),
-            'END:VALARM',
-            'END:VEVENT',
-            'END:VCALENDAR',
-        ]);
-
-        return implode("\r\n", $lines) . "\r\n";
+        return Ics::calendar([
+            Ics::event(
+                uid: Ics::uid('live-class', $this->id),
+                start: $this->starts_at,
+                end: $this->endsAt(),
+                summary: $this->calendarTitle(),
+                description: $description,
+                location: $this->canJoin() ? $this->join_link : null,
+                url: $this->canJoin() ? $this->join_link : null,
+                // A 15 minute heads-up, the same nudge the dashboard badge gives.
+                alarmMinutes: 15,
+                alarmText: $this->calendarTitle() . ' starts in 15 minutes',
+            ),
+        ], prodId: '-//Classroom//Live Class//EN');
     }
 
     /** "Add to Google Calendar" prefilled event link. */
@@ -129,13 +108,4 @@ class LiveClassContent extends Model
         ]);
     }
 
-    /** RFC 5545 escaping: backslashes, semicolons, commas and newlines. */
-    private function escapeIcsText(?string $value): string
-    {
-        return str_replace(
-            ['\\', ';', ',', "\r\n", "\n"],
-            ['\\\\', '\;', '\,', '\n', '\n'],
-            (string) $value
-        );
-    }
 }

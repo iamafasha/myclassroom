@@ -115,11 +115,8 @@ new class extends Component {
             return;
         }
 
-        $session = $this->createSession([
-            'status' => MentorSession::STATUS_SCHEDULED,
-            'scheduled_at' => \Illuminate\Support\Carbon::parse($this->chosenSlot),
-            'meeting_link' => $block->meeting_link,
-        ]);
+        $session = $this->createSession(['status' => MentorSession::STATUS_PENDING])
+            ->book($this->chosenSlot, $block->meeting_link);
 
         $this->reset('chosenSlot');
         $this->refresh();
@@ -174,11 +171,7 @@ new class extends Component {
             return;
         }
 
-        $session->update([
-            'status' => MentorSession::STATUS_SCHEDULED,
-            'scheduled_at' => $chosen,
-            'meeting_link' => $session->meeting_link ?: $this->block->meeting_link,
-        ]);
+        $session->book($chosen, $this->block->meeting_link);
 
         unset($this->selectedSlots[$sessionId]);
         $this->refresh();
