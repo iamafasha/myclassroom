@@ -244,6 +244,49 @@ new #[Layout('layouts.app')] class extends Component
         abort_unless($this->canManage, 403, 'Only the course owner can manage this content.');
     }
 
+    /**
+     * Removes this lesson and everything inside it. Pivot rows — and with them any exercise
+     * answers — go with the module content through the schema's cascades.
+     */
+    public function deleteModuleContent()
+    {
+        $this->authorizeManage();
+
+        $module = $this->moduleContent->module;
+
+        foreach ($this->moduleContent->contents as $content) {
+            $content->contentable?->delete();
+            $content->delete();
+        }
+
+        $this->moduleContent->delete();
+
+        return $module
+            ? redirect()->route('course.module.show', ['courseId' => $module->course_id, 'moduleId' => $module->id])
+            : redirect()->route('home');
+    }
+
+    /**
+     * Removes a single block from this content, leaving the content and its other blocks
+     * in place. Deleting the last block leaves an empty content to add to again.
+     */
+    public function deleteContentItem($contentId)
+    {
+        $this->authorizeManage();
+
+        $content = $this->moduleContent->contents()->whereKey($contentId)->first();
+
+        if (! $content) {
+            return;
+        }
+
+        $this->moduleContent->contents()->detach($content->id);
+        $content->contentable?->delete();
+        $content->delete();
+
+        $this->moduleContent->load('contents');
+    }
+
     public function moveContentItemUp($contentId)
     {
         $this->authorizeManage();
@@ -304,6 +347,16 @@ new #[Layout('layouts.app')] class extends Component
         </div>
 
         @if($this->canManage)
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+        <button wire:click="deleteModuleContent"
+                wire:confirm="Delete &quot;{{ $moduleContent->label ?? 'this content' }}&quot; and everything inside it? This cannot be undone."
+                style="background-color: #FEE2E2; color: #B91C1C; border: 1px solid #FECACA; padding: 0.5rem 1rem; border-radius: 0.375rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 0.5rem;"
+                title="Delete this content">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            Delete Content
+        </button>
         <div x-data="{ open: false }" style="position: relative; display: inline-block;">
             <button @click="open = !open" style="background-color: #4F46E5; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; transition: background-color 0.2s;">
                 + Add Content
@@ -321,6 +374,7 @@ new #[Layout('layouts.app')] class extends Component
                 <a href="/content/{{ $moduleContent->id }}/add?type=live" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">Live Class</a>
                 <a href="/content/{{ $moduleContent->id }}/add?type=session" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none;">Mentor Session</a>
             </div>
+        </div>
         </div>
         @endif
     </div>
@@ -378,6 +432,10 @@ new #[Layout('layouts.app')] class extends Component
                     <button wire:click="moveContentItemUp({{ $singleContent->id }})" @if($loop->first) disabled @endif title="Move up" style="width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; background: white; border: 1px solid #D1D5DB; border-radius: 6px; cursor: {{ $loop->first ? 'not-allowed' : 'pointer' }}; opacity: {{ $loop->first ? '0.4' : '1' }}; color: #374151;">&uarr;</button>
                     <button wire:click="moveContentItemDown({{ $singleContent->id }})" @if($loop->last) disabled @endif title="Move down" style="width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; background: white; border: 1px solid #D1D5DB; border-radius: 6px; cursor: {{ $loop->last ? 'not-allowed' : 'pointer' }}; opacity: {{ $loop->last ? '0.4' : '1' }}; color: #374151;">&darr;</button>
                     <a href="{{ route('content.edit', ['moduleContentId' => $moduleContent->id, 'contentId' => $singleContent->id]) }}" wire:navigate style="margin-left: 4px; padding: 6px 12px; background: white; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.8rem; font-weight: 600; color: #4F46E5; text-decoration: none;">Edit</a>
+                    <button wire:click="deleteContentItem({{ $singleContent->id }})"
+                            wire:confirm="Remove this {{ strtolower($contentTypeLabels[$type] ?? 'content') }} block? The rest of this content stays put."
+                            title="Delete this block"
+                            style="padding: 6px 12px; background: #FEE2E2; border: 1px solid #FECACA; border-radius: 6px; font-size: 0.8rem; font-weight: 600; color: #B91C1C; cursor: pointer;">Delete</button>
                 </div>
                 @endif
             </div>
