@@ -31,7 +31,7 @@
                 background-color: var(--bg-shell);
                 color: var(--text-primary);
                 display: flex;
-                height: 100vh;
+                height: 100dvh
                 overflow: hidden;
                 padding: 12px;
                 gap: 12px;
