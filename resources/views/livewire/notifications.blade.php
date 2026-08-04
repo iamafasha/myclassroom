@@ -4,6 +4,7 @@ use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
 use App\Models\Course;
 use App\Models\LiveClassContent;
+use App\Models\MentorSession;
 
 new class extends Component {
 
@@ -32,13 +33,38 @@ new class extends Component {
             ->values();
     }
 
-    /** Badge only counts what needs attention today: running now, or starting within 24h. */
+    /**
+     * Sessions that need a move from this user: requests waiting on them as a
+     * mentor, times waiting to be picked as a student, and what is booked next.
+     */
+    #[Computed]
+    public function sessions()
+    {
+        return MentorSession::query()
+            ->with(['course', 'student', 'mentor'])
+            ->where(function ($q) {
+                $userId = auth()->id();
+
+                $q->where(fn ($m) => $m->where('mentor_id', $userId)->where('status', MentorSession::STATUS_PENDING))
+                    ->orWhere(fn ($s) => $s->where('student_id', $userId)->where('status', MentorSession::STATUS_PROPOSED))
+                    ->orWhere(fn ($b) => $b->visibleTo($userId)
+                        ->where('status', MentorSession::STATUS_SCHEDULED)
+                        ->where('scheduled_at', '>=', now()->subHour()));
+            })
+            ->orderByRaw('COALESCE(scheduled_at, preferred_at, created_at) ASC')
+            ->take(10)
+            ->get();
+    }
+
+    /** Badge counts what needs attention today: live or imminent classes, plus every session item. */
     #[Computed]
     public function urgentCount()
     {
-        return $this->items
+        $classes = $this->items
             ->filter(fn ($liveClass) => $liveClass->status() === 'live' || $liveClass->starts_at->lte(now()->addDay()))
             ->count();
+
+        return $classes + $this->sessions->count();
     }
 }; ?>
 
@@ -71,6 +97,48 @@ new class extends Component {
         </div>
 
         <div style="overflow-y: auto; padding: 8px;">
+            @foreach($this->sessions as $session)
+                @php
+                    $isMentor = $session->mentor_id === auth()->id();
+                    $needsMe = $session->isPending() ? $isMentor : ($session->isProposed() && !$isMentor);
+                    $other = $isMentor ? $session->student : $session->mentor;
+                @endphp
+                <div style="padding: 12px; border-radius: 12px; display: flex; flex-direction: column; gap: 6px; {{ $needsMe ? 'background: #FAF5FF;' : '' }}">
+                    <span style="font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: {{ $needsMe ? '#6D28D9' : '#1D4ED8' }};">
+                        @if($session->isPending())
+                            New session request
+                        @elseif($session->isProposed())
+                            {{ $isMentor ? 'Waiting on student' : 'Pick a time' }}
+                        @else
+                            Session {{ $session->scheduled_at->diffForHumans() }}
+                        @endif
+                    </span>
+
+                    <p style="margin: 0; font-size: 13px; font-weight: 600; color: #111827;">{{ $session->topic }}</p>
+
+                    <p style="margin: 0; font-size: 11px; color: #6B7280;">
+                        {{ $isMentor ? 'from' : 'with' }} {{ $other?->name }}
+                        @if($session->scheduled_at) <br>{{ $session->scheduled_at->format('D, j M · H:i') }} @endif
+                        @if($session->course) <br>{{ $session->course->title }} @endif
+                    </p>
+
+                    <div style="display: flex; gap: 10px; align-items: center; margin-top: 2px;">
+                        <a href="{{ route('sessions.index', ['tab' => $isMentor ? 'incoming' : 'mine']) }}" wire:navigate @click="open = false"
+                           style="font-size: 11px; font-weight: 700; color: #2563EB; text-decoration: none;">
+                            {{ $session->isPending() && $isMentor ? 'Offer times' : ($session->isProposed() && !$isMentor ? 'Choose' : 'Open') }}
+                        </a>
+                        @if($session->isScheduled() && $session->meeting_link)
+                            <a href="{{ $session->meeting_link }}" target="_blank" rel="noopener noreferrer"
+                               style="font-size: 11px; font-weight: 700; color: #4B5563; text-decoration: none;">Join</a>
+                        @endif
+                    </div>
+                </div>
+            @endforeach
+
+            @if($this->sessions->isNotEmpty() && $this->items->isNotEmpty())
+                <div style="height: 1px; background: #F3F4F6; margin: 8px 12px;"></div>
+            @endif
+
             @forelse($this->items as $liveClass)
                 @php
                     $isLive = $liveClass->status() === 'live';
@@ -108,12 +176,12 @@ new class extends Component {
                     </div>
                 </div>
             @empty
-                <div style="text-align: center; padding: 40px 20px;">
+                <div style="text-align: center; padding: 40px 20px; {{ $this->sessions->isNotEmpty() ? 'display: none;' : '' }}">
                     <svg width="32" height="32" fill="none" stroke="#D1D5DB" stroke-width="1.5" viewBox="0 0 24 24" style="margin: 0 auto 10px; display: block;">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                     </svg>
                     <p style="margin: 0; font-size: 13px; font-weight: 600; color: #4B5563;">You're all caught up</p>
-                    <p style="margin: 4px 0 0; font-size: 12px; color: #9CA3AF;">Upcoming live classes will appear here.</p>
+                    <p style="margin: 4px 0 0; font-size: 12px; color: #9CA3AF;">Live classes and sessions will appear here.</p>
                 </div>
             @endforelse
         </div>

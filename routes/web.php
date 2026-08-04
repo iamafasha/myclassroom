@@ -18,6 +18,8 @@ Route::middleware('auth')->group(function () {
 
     \Livewire\Volt\Volt::route('/files', 'files.index')->name('files.index');
 
+    \Livewire\Volt\Volt::route('/sessions', 'sessions.index')->name('sessions.index');
+
     // One request per file, so the file manager can upload several at once and retry just the ones that fail.
     Route::post('/files/upload', function (Illuminate\Http\Request $request) {
         $request->validate([

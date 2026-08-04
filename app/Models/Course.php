@@ -23,6 +23,11 @@ class Course extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
+    public function mentorSessions()
+    {
+        return $this->hasMany(MentorSession::class);
+    }
+
     /**
      * Only the creator manages a course: modules, contents and submissions.
      */
@@ -36,6 +41,19 @@ class Course extends Model
     public function scopeManagedBy($query, $user)
     {
         return $query->where('created_by', $user instanceof User ? $user->id : $user);
+    }
+
+    /**
+     * Courses a user may book a session on: ones they can see, taught by
+     * someone else. You do not request a session with yourself.
+     */
+    public function scopeSessionRequestableBy($query, $user)
+    {
+        $userId = $user instanceof User ? $user->id : $user;
+
+        return $query->visibleTo($userId)
+            ->whereNotNull('created_by')
+            ->where('created_by', '!=', $userId);
     }
 
     /**

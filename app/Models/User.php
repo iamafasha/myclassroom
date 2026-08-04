@@ -34,4 +34,16 @@ class User extends Authenticatable
     {
         return $this->belongsToMany(Classroom::class);
     }
+
+    /** Sessions this user asked for, as a student. */
+    public function sessionRequests()
+    {
+        return $this->hasMany(MentorSession::class, 'student_id');
+    }
+
+    /** Sessions asked of this user, as the mentor who owns the course. */
+    public function mentorSessions()
+    {
+        return $this->hasMany(MentorSession::class, 'mentor_id');
+    }
 }
