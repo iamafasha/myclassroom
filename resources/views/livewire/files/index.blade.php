@@ -13,9 +13,45 @@ new #[Layout('layouts.app')] class extends Component {
     /** Search term matched against the file name. */
     public string $search = '';
 
+    /** Sort column: one of the keys in sortOptions(). */
+    public string $sort = 'recent';
+
+    /** Sort direction: 'asc' or 'desc'. */
+    public string $direction = 'desc';
+
     public function selectType(string $type)
     {
         $this->type = $type === 'all' || array_key_exists($type, $this->typeGroups()) ? $type : 'all';
+    }
+
+    /** Picking the same column again flips the direction; a new column starts on its natural one. */
+    public function selectSort(string $sort)
+    {
+        if (! array_key_exists($sort, $this->sortOptions())) {
+            return;
+        }
+
+        $this->direction = $sort === $this->sort
+            ? ($this->direction === 'asc' ? 'desc' : 'asc')
+            : $this->sortOptions()[$sort]['default'];
+
+        $this->sort = $sort;
+    }
+
+    public function toggleDirection()
+    {
+        $this->direction = $this->direction === 'asc' ? 'desc' : 'asc';
+    }
+
+    /** Sort columns, with the direction each one should start in and labels for both directions. */
+    public function sortOptions()
+    {
+        return [
+            'recent' => ['label' => 'Date added', 'default' => 'desc', 'asc' => 'Oldest first', 'desc' => 'Newest first'],
+            'name' => ['label' => 'Name', 'default' => 'asc', 'asc' => 'A to Z', 'desc' => 'Z to A'],
+            'size' => ['label' => 'Size', 'default' => 'desc', 'asc' => 'Smallest first', 'desc' => 'Largest first'],
+            'type' => ['label' => 'Type', 'default' => 'asc', 'asc' => 'A to Z', 'desc' => 'Z to A'],
+        ];
     }
 
     public function clearFilters()
@@ -78,13 +114,24 @@ new #[Layout('layouts.app')] class extends Component {
     #[Computed]
     public function files()
     {
-        $query = File::ownedBy(auth()->user())->search($this->search)->latest();
+        $query = File::ownedBy(auth()->user())->search($this->search);
 
         if ($this->type === 'other') {
             $query->whereNotIn('file_type', $this->knownTypes());
         } elseif ($this->type !== 'all') {
             $query->whereIn('file_type', $this->typeGroups()[$this->type]['types']);
         }
+
+        $direction = $this->direction === 'asc' ? 'asc' : 'desc';
+        $sort = array_key_exists($this->sort, $this->sortOptions()) ? $this->sort : 'recent';
+
+        match ($sort) {
+            // Files stored before sizes were recorded sort as zero rather than dropping to a random spot.
+            'size' => $query->orderByRaw("COALESCE(size, 0) {$direction}")->orderBy('name'),
+            'name' => $query->orderBy('name', $direction),
+            'type' => $query->orderBy('file_type', $direction)->orderBy('name'),
+            default => $query->orderBy('created_at', $direction)->orderBy('id', $direction),
+        };
 
         return $query->get();
     }
@@ -325,13 +372,38 @@ new #[Layout('layouts.app')] class extends Component {
                 </template>
             </div>
 
-            <!-- Search -->
-            <div style="position: relative; margin-bottom: 16px;">
-                <svg width="16" height="16" fill="none" stroke="#9CA3AF" viewBox="0 0 24 24" style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%);">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z"></path>
-                </svg>
-                <input type="search" wire:model.live.debounce.300ms="search" placeholder="Search files by name..."
-                       style="width: 100%; padding: 11px 14px 11px 40px; border-radius: 8px; border: 1px solid #D1D5DB; font-size: 13px; outline: none;">
+            <!-- Search + Sort -->
+            <div style="display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap;">
+                <div style="position: relative; flex: 1; min-width: 220px;">
+                    <svg width="16" height="16" fill="none" stroke="#9CA3AF" viewBox="0 0 24 24" style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%);">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z"></path>
+                    </svg>
+                    <input type="search" wire:model.live.debounce.300ms="search" placeholder="Search files by name..."
+                           style="width: 100%; padding: 11px 14px 11px 40px; border-radius: 8px; border: 1px solid #D1D5DB; font-size: 13px; outline: none;">
+                </div>
+
+                @php($sortOption = $this->sortOptions()[$sort] ?? $this->sortOptions()['recent'])
+                @php($sortDirection = $direction === 'asc' ? 'asc' : 'desc')
+                <div style="display: flex; align-items: stretch; gap: 8px;">
+                    <select wire:change="selectSort($event.target.value)" aria-label="Sort files by"
+                            style="padding: 11px 14px; border-radius: 8px; border: 1px solid #D1D5DB; font-size: 13px; font-weight: 600; color: #4B5563; background: #ffffff; cursor: pointer; outline: none;">
+                        @foreach ($this->sortOptions() as $key => $option)
+                            <option value="{{ $key }}" @selected($key === $sort)>Sort: {{ $option['label'] }}</option>
+                        @endforeach
+                    </select>
+
+                    <button type="button" wire:click="toggleDirection" title="{{ $sortOption[$sortDirection] }}"
+                            style="display: flex; align-items: center; gap: 6px; padding: 11px 14px; border-radius: 8px; border: 1px solid #D1D5DB; background: #ffffff; font-size: 13px; font-weight: 600; color: #4B5563; cursor: pointer; white-space: nowrap;">
+                        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            @if ($sortDirection === 'asc')
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9M3 12h5m5 8V8m0 0l-4 4m4-4l4 4"></path>
+                            @else
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9M3 12h5m5 0v12m0 0l4-4m-4 4l-4-4"></path>
+                            @endif
+                        </svg>
+                        {{ $sortOption[$sortDirection] }}
+                    </button>
+                </div>
             </div>
 
             <!-- Type Filters -->
@@ -375,6 +447,9 @@ new #[Layout('layouts.app')] class extends Component {
                             @endif
                             <div class="content-details">
                                 <span class="badge" style="background: {{ $style['bg'] }}; color: {{ $style['color'] }};">{{ strtoupper($file->file_type) }}</span>
+                                @if ($file->sizeForHumans())
+                                    <span>{{ $file->sizeForHumans() }}</span>
+                                @endif
                                 <span>Uploaded {{ $file->created_at->diffForHumans() }}</span>
                                 <span><a href="{{ asset('storage/' . $file->file_path) }}" target="_blank" style="color: #2563EB; text-decoration: none;">View File</a></span>
                             </div>

@@ -33,6 +33,8 @@ it('categorises the upload by extension and owns it to the uploader', function (
     $file = File::first();
     expect($file->file_type)->toBe('zip');
     expect($file->user_id)->toBe($user->id);
+    // Recorded at upload time so the list can sort by size.
+    expect($file->size)->toBe(10 * 1024);
 });
 
 it('uses the supplied name when one is given', function () {

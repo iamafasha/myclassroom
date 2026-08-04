@@ -19,6 +19,25 @@ class File extends Model
         return $query->where('user_id', $user instanceof User ? $user->id : $user);
     }
 
+    /** Human readable size, e.g. "1.4 MB". Null for files uploaded before sizes were recorded. */
+    public function sizeForHumans(): ?string
+    {
+        if ($this->size === null) {
+            return null;
+        }
+
+        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        $size = (float) $this->size;
+        $unit = 0;
+
+        while ($size >= 1024 && $unit < count($units) - 1) {
+            $size /= 1024;
+            $unit++;
+        }
+
+        return round($size, $size < 10 && $unit > 0 ? 1 : 0) . ' ' . $units[$unit];
+    }
+
     /** Maps an uploaded file's extension onto the stored file_type value. */
     public static function typeForExtension(?string $extension): string
     {

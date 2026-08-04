@@ -34,6 +34,7 @@ Route::middleware('auth')->group(function () {
             'name' => $name !== '' ? $name : $upload->getClientOriginalName(),
             'file_path' => $upload->store('uploads', 'public'),
             'file_type' => App\Models\File::typeForExtension($upload->getClientOriginalExtension()),
+            'size' => $upload->getSize(),
         ]);
 
         return response()->json(['id' => $file->id, 'name' => $file->name]);

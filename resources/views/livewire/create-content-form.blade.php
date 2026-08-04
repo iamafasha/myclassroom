@@ -285,6 +285,7 @@ new #[Layout('layouts.app')] class extends Component
                     'name' => $this->pdfUpload->getClientOriginalName(),
                     'file_path' => $this->pdfUpload->store('uploads', 'public'),
                     'file_type' => 'pdf',
+                    'size' => $this->pdfUpload->getSize(),
                 ]);
             } else {
                 $this->validate([
