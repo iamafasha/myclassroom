@@ -57,7 +57,7 @@ it('greets the user and points at the first unfinished lesson', function () {
 
 it('skips lessons already completed', function () {
     [$student, , , $lessons] = seedHome();
-    $lessons['Intro']->update(['is_completed' => true]);
+    $lessons['Intro']->markCompletedFor($student);
 
     $this->actingAs($student)->get(route('home'))
         ->assertOk()
@@ -66,7 +66,7 @@ it('skips lessons already completed', function () {
 
 it('shows the latest module with its progress and course', function () {
     [$student, , $module, $lessons] = seedHome();
-    $lessons['Intro']->update(['is_completed' => true]);
+    $lessons['Intro']->markCompletedFor($student);
 
     $this->actingAs($student)->get(route('home'))
         ->assertOk()

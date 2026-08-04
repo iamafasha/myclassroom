@@ -76,8 +76,7 @@ new #[Layout('layouts.app')] class extends Component
 
         $answer->save();
 
-        $this->moduleContent->is_completed = true;
-        $this->moduleContent->save();
+        $this->moduleContent->markCompletedFor(auth()->user());
 
         unset($this->submissionFiles[$pivotId]);
         $this->moduleContent->load('contents');
@@ -334,7 +333,7 @@ new #[Layout('layouts.app')] class extends Component
                 $backUrl = ($course && $module) ? route('course.module.show', ['courseId' => $course->id, 'moduleId' => $module->id]) : route('home');
             @endphp
             <a href="{{ $backUrl }}" wire:navigate style="color: #4F46E5; text-decoration: none; font-weight: 500; display: inline-block; margin-bottom: 15px;">&larr; Back to Dashboard</a>
-            <h1 class="content-title" style="{{ $moduleContent->is_completed ? 'text-decoration: line-through; color: #6B7280;' : '' }}">{{ $moduleContent->label ?? 'Content' }}</h1>
+            <h1 class="content-title" style="{{ $moduleContent->isCompletedFor(auth()->user()) ? 'text-decoration: line-through; color: #6B7280;' : '' }}">{{ $moduleContent->label ?? 'Content' }}</h1>
             @if($moduleContent->study_at)
                 <div style="margin-top: 8px; font-size: 0.8125rem; color: #4338CA; background: #EEF2FF; border: 1px solid #C7D2FE; border-radius: 9999px; padding: 3px 10px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;"
                      title="Planned start date">
@@ -967,14 +966,14 @@ new #[Layout('layouts.app')] class extends Component
                         </div>
                     @endif
 
-                    @if($moduleContent->score)
+                    @if($moduleContent->quizScoreFor(auth()->user()))
                         <div style="margin-bottom: 24px; padding: 16px 20px; background: #ECFDF5; border: 1px solid #A7F3D0; border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
                             <div>
                                 <h4 style="margin: 0; color: #065F46; font-size: 1rem; font-weight: 700;">Quiz Completed!</h4>
                                 <p style="margin: 4px 0 0 0; color: #047857; font-size: 0.875rem;">Your score has been calculated and saved.</p>
                             </div>
                             <div style="font-size: 1.25rem; font-weight: 800; color: #059669; background: white; padding: 8px 18px; border-radius: 8px; border: 1px solid #A7F3D0;">
-                                Score: {{ $moduleContent->score }}
+                                Score: {{ $moduleContent->quizScoreFor(auth()->user()) }}
                             </div>
                         </div>
                     @endif
@@ -1026,7 +1025,7 @@ new #[Layout('layouts.app')] class extends Component
                                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                                 </svg>
-                                {{ $moduleContent->is_completed ? 'Resubmit Quiz' : 'Submit Quiz Answers' }}
+                                {{ $moduleContent->isCompletedFor(auth()->user()) ? 'Resubmit Quiz' : 'Submit Quiz Answers' }}
                             </button>
                         </div>
                     </form>
@@ -1266,7 +1265,7 @@ new #[Layout('layouts.app')] class extends Component
         <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #E5E7EB; display: flex; justify-content: flex-end; align-items: center; gap: 12px; flex-wrap: wrap;">
             <form action="{{ route('content.toggle-complete', $moduleContent->id) }}" method="POST">
                 @csrf
-                @if($moduleContent->is_completed)
+                @if($moduleContent->isCompletedFor(auth()->user()))
                     <button type="submit" style="background-color: #ECFDF5; color: #059669; border: 1px solid #A7F3D0; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s;">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />

@@ -53,9 +53,9 @@ Route::middleware('auth')->group(function () {
         ]);
     })->name('live-class.ics');
     
+    // Progress belongs to the person reading, not to the lesson.
     Route::post('/content/{moduleContent}/toggle-complete', function (App\Models\ModuleContent $moduleContent) {
-        $moduleContent->is_completed = !$moduleContent->is_completed;
-        $moduleContent->save();
+        $moduleContent->toggleCompletedFor(request()->user());
         return back();
     })->name('content.toggle-complete');
 
@@ -80,10 +80,8 @@ Route::middleware('auth')->group(function () {
             }
         }
         
-        $moduleContent->score = $correctCount . '/' . $totalQuestions;
-        $moduleContent->is_completed = true;
-        $moduleContent->save();
-        
+        $moduleContent->markCompletedFor(request()->user(), $correctCount . '/' . $totalQuestions);
+
         return back();
     })->name('content.submit-quiz');
 });

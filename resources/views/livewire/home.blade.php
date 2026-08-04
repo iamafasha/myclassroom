@@ -138,6 +138,23 @@ new #[Layout('layouts.app')] class extends Component
             ->first();
     }
 
+    /** "This lesson is finished by me", for whereHas/whereDoesntHave. */
+    private function finishedByMe(): callable
+    {
+        return fn ($query) => $query->where('user_id', auth()->id())->whereNotNull('completed_at');
+    }
+
+    /**
+     * Joins in only the current user's progress rows, so every tally below counts what
+     * this person has finished rather than what anybody in the class has.
+     */
+    private function myProgressJoin(): callable
+    {
+        return fn ($join) => $join
+            ->on('module_content_user.module_content_id', '=', 'module_contents.id')
+            ->where('module_content_user.user_id', auth()->id());
+    }
+
     /** Lesson tallies per module, so progress bars never trigger a query per card. */
     #[Computed]
     public function lessonTotals()
@@ -148,9 +165,10 @@ new #[Layout('layouts.app')] class extends Component
 
         return ModuleContent::query()
             ->join('modules', 'modules.id', '=', 'module_contents.module_id')
+            ->leftJoin('module_content_user', $this->myProgressJoin())
             ->whereIn('modules.course_id', $this->courseIds)
             ->groupBy('module_contents.module_id')
-            ->selectRaw('module_contents.module_id, count(*) as total, sum(module_contents.is_completed) as done')
+            ->selectRaw('module_contents.module_id, count(*) as total, count(module_content_user.completed_at) as done')
             ->get()
             ->keyBy('module_id');
     }
@@ -194,11 +212,14 @@ new #[Layout('layouts.app')] class extends Component
 
         $liveClasses = $this->liveClassesOfModule($module);
 
-        // The freshest quiz result in this module, shown as-is ("3/5").
-        $score = ModuleContent::where('module_id', $module->id)
-            ->whereNotNull('score')
-            ->latest('updated_at')
-            ->value('score');
+        // This user's freshest quiz result in this module, shown as-is ("3/5").
+        $score = ModuleContent::query()
+            ->join('module_content_user', 'module_content_user.module_content_id', '=', 'module_contents.id')
+            ->where('module_contents.module_id', $module->id)
+            ->where('module_content_user.user_id', auth()->id())
+            ->whereNotNull('module_content_user.quiz_score')
+            ->latest('module_content_user.updated_at')
+            ->value('module_content_user.quiz_score');
 
         return [
             'lessons' => [$progress['done'], $progress['total']],
@@ -227,7 +248,7 @@ new #[Layout('layouts.app')] class extends Component
     #[Computed]
     public function nextLesson()
     {
-        return $this->lessonQuery()->where('module_contents.is_completed', false)->first()
+        return $this->lessonQuery()->whereDoesntHave('progress', $this->finishedByMe())->first()
             ?? $this->lessonQuery()->first();
     }
 
@@ -244,7 +265,7 @@ new #[Layout('layouts.app')] class extends Component
             ->orderBy('sort_order')
             ->orderBy('id');
 
-        return $query()->where('is_completed', false)->first() ?? $query()->first();
+        return $query()->whereDoesntHave('progress', $this->finishedByMe())->first() ?? $query()->first();
     }
 
     private function lessonQuery()
@@ -290,9 +311,10 @@ new #[Layout('layouts.app')] class extends Component
 
         $totals = ModuleContent::query()
             ->join('modules', 'modules.id', '=', 'module_contents.module_id')
+            ->leftJoin('module_content_user', $this->myProgressJoin())
             ->whereIn('modules.course_id', $this->courseIds)
             ->groupBy('modules.course_id')
-            ->selectRaw('modules.course_id, count(*) as total, sum(module_contents.is_completed) as done')
+            ->selectRaw('modules.course_id, count(*) as total, count(module_content_user.completed_at) as done')
             ->get()
             ->keyBy('course_id');
 
@@ -696,7 +718,7 @@ new #[Layout('layouts.app')] class extends Component
             <div class="resume-body">
                 <div class="resume-copy">
                     @if($nextLesson)
-                        <div class="resume-title">{{ $nextLesson->is_completed ? 'Revisit your last lesson' : 'Pick up where you left off' }}</div>
+                        <div class="resume-title">{{ $nextLesson->isCompletedFor(auth()->user()) ? 'Revisit your last lesson' : 'Pick up where you left off' }}</div>
                         <div class="resume-eyebrow">{{ $this->lessonKind($nextLesson) }} · {{ $nextLesson->module?->course?->title }}</div>
                         <div class="resume-context">"{{ $nextLesson->label ?? 'Untitled lesson' }}"</div>
                     @elseif($this->currentClassroom)
@@ -712,7 +734,7 @@ new #[Layout('layouts.app')] class extends Component
 
                 @if($nextLesson)
                     <a href="{{ route('content.show', $nextLesson->id) }}" wire:navigate class="btn-primary">
-                        {{ $nextLesson->is_completed ? 'Review' : 'Continue' }}
+                        {{ $nextLesson->isCompletedFor(auth()->user()) ? 'Review' : 'Continue' }}
                         <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
                         </svg>
@@ -759,7 +781,7 @@ new #[Layout('layouts.app')] class extends Component
 
                     @if($latestLesson)
                         <a href="{{ route('content.show', $latestLesson->id) }}" wire:navigate class="btn-solid-dark">
-                            {{ $latestLesson->is_completed ? 'Open' : 'Start' }}
+                            {{ $latestLesson->isCompletedFor(auth()->user()) ? 'Open' : 'Start' }}
                             <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
                             </svg>

@@ -218,12 +218,14 @@ new #[Layout('layouts.app')] class extends Component
         )->find($contentId);
     }
 
+    /** Completion is per person, so ticking a lesson off only affects the current user. */
     public function toggleComplete($contentId)
     {
         $moduleContent = \App\Models\ModuleContent::find($contentId);
+
         if ($moduleContent) {
-            $moduleContent->is_completed = !$moduleContent->is_completed;
-            $moduleContent->save();
+            $moduleContent->toggleCompletedFor(auth()->user());
+            unset($this->contents);
         }
     }
 
@@ -425,7 +427,11 @@ new #[Layout('layouts.app')] class extends Component
         if (!$this->selectedModuleId) {
             return collect();
         }
-        $module = Module::with('moduleContents.contents.contentable')->find($this->selectedModuleId);
+        $module = Module::with([
+            'moduleContents.contents.contentable',
+            // Only this user's progress, so the list reflects their own completions.
+            'moduleContents.progress' => fn ($query) => $query->where('user_id', auth()->id()),
+        ])->find($this->selectedModuleId);
         return $module ? $module->moduleContents : collect();
     }
 };
@@ -569,7 +575,7 @@ new #[Layout('layouts.app')] class extends Component
             @foreach($this->contents as $moduleContent)
                 <div @if($this->canManageCourse) draggable="true"
                      @dragstart="event.dataTransfer.setData('contentId', '{{ $moduleContent->id }}'); event.dataTransfer.effectAllowed = 'move';" @endif
-                     class="content-card group {{ $moduleContent->is_completed ? 'completed' : '' }}" 
+                     class="content-card group {{ $moduleContent->isCompletedFor(auth()->user()) ? 'completed' : '' }}" 
                      style="width:100%; cursor: {{ $this->canManageCourse ? 'grab' : 'default' }}; display: flex; align-items: center; gap: 10px;">
                     
                     @if($this->canManageCourse)
@@ -581,7 +587,7 @@ new #[Layout('layouts.app')] class extends Component
                     @endif
 
                     <div class="content-info" style="flex: 1;">
-                        <div class="content-name" style="{{ $moduleContent->is_completed ? 'text-decoration: line-through; color: #6B7280;' : '' }}">
+                        <div class="content-name" style="{{ $moduleContent->isCompletedFor(auth()->user()) ? 'text-decoration: line-through; color: #6B7280;' : '' }}">
                             {{ $moduleContent->label ?? 'Unnamed Content' }}
                         </div>
                         <div class="content-details" style="margin-top: 4px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
@@ -633,9 +639,9 @@ new #[Layout('layouts.app')] class extends Component
                                 </span>
                             @endif
 
-                            @if($moduleContent->score)
+                            @if($moduleContent->quizScoreFor(auth()->user()))
                                 <span style="font-size: 0.75rem; color: #92400E; background: #FDE68A; border: 1px solid #F59E0B; padding: 2px 8px; border-radius: 9999px; font-weight: 700; display: inline-flex; align-items: center;">
-                                    Score: {{ $moduleContent->score }}
+                                    Score: {{ $moduleContent->quizScoreFor(auth()->user()) }}
                                 </span>
                             @endif
 
@@ -650,7 +656,7 @@ new #[Layout('layouts.app')] class extends Component
                                 @endif
                             @endforeach
                             
-                            @if($moduleContent->is_completed)
+                            @if($moduleContent->isCompletedFor(auth()->user()))
                                 <span style="font-size: 0.75rem; color: #059669; background: #ECFDF5; border: 1px solid #A7F3D0; padding: 2px 8px; border-radius: 9999px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
