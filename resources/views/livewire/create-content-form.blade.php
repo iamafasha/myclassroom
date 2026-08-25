@@ -116,7 +116,7 @@ new #[Layout('layouts.app')] class extends Component
     #[Computed]
     public function videoFiles()
     {
-        return $this->filesForPicker(['video', 'mp4', 'mov', 'avi']);
+        return $this->filesForPicker(['video', 'mp4', 'mov', 'avi', 'webm']);
     }
 
     #[Computed]

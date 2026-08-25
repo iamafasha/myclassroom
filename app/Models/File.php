@@ -61,7 +61,7 @@ class File extends Model
             $extension === 'pdf' => 'pdf',
             in_array($extension, ['doc', 'docx']) => 'word',
             in_array($extension, ['xls', 'xlsx']) => 'excel',
-            in_array($extension, ['mp4', 'mov', 'avi']) => 'video',
+            in_array($extension, ['mp4', 'mov', 'avi', 'webm']) => 'video',
             in_array($extension, ['mp3', 'wav']) => 'audio',
             default => $extension ?: 'other',
         };
