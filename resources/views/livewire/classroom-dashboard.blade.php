@@ -246,7 +246,7 @@ new #[Layout('layouts.app')] class extends Component
         }
     }
 
-    public function addContent()
+    public function addContent($type = 'note')
     {
         $this->authorizeManage();
 
@@ -261,7 +261,7 @@ new #[Layout('layouts.app')] class extends Component
             'sort_order' => $maxOrder + 1,
         ]);
 
-        return redirect()->route('content.show', $moduleContent->id);
+        return redirect()->route('content.create', ['moduleContentId' => $moduleContent->id, 'type' => $type]);
     }
 
     public function deleteModule($moduleId)
@@ -552,9 +552,24 @@ new #[Layout('layouts.app')] class extends Component
                     <h1 class="content-title">{{ $this->currentModule ? $this->currentModule->title : 'No topic selected' }}</h1>
                 </div>
                 @if($this->currentModule && $this->canManageCourse)
-                    <button wire:click="addContent" style="background-color: #4F46E5; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; transition: background-color 0.2s;">
-                        + Add Content
-                    </button>
+                    <div x-data="{ open: false }" style="position: relative; display: inline-block;">
+                        <button @click="open = !open" style="background-color: #4F46E5; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; transition: background-color 0.2s;">
+                            + Add Content
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" :style="open ? 'transform: rotate(180deg); transition: transform 0.2s;' : 'transition: transform 0.2s;'">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                            </svg>
+                        </button>
+                        <div x-show="open" @click.outside="open = false" x-transition style="display: none; position: absolute; right: 0; margin-top: 0.5rem; width: 12rem; background-color: white; border-radius: 0.375rem; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); border: 1px solid #E5E7EB; z-index: 50;">
+                            <button type="button" wire:click="addContent('note')" @click="open = false" style="display: block; width: 100%; text-align: left; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; background: none; border: none; border-bottom: 1px solid #F3F4F6; cursor: pointer;">Text Note</button>
+                            <button type="button" wire:click="addContent('pdf')" @click="open = false" style="display: block; width: 100%; text-align: left; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; background: none; border: none; border-bottom: 1px solid #F3F4F6; cursor: pointer;">PDF Document</button>
+                            <button type="button" wire:click="addContent('image')" @click="open = false" style="display: block; width: 100%; text-align: left; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; background: none; border: none; border-bottom: 1px solid #F3F4F6; cursor: pointer;">Image Content</button>
+                            <button type="button" wire:click="addContent('video')" @click="open = false" style="display: block; width: 100%; text-align: left; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; background: none; border: none; border-bottom: 1px solid #F3F4F6; cursor: pointer;">Video Content</button>
+                            <button type="button" wire:click="addContent('link')" @click="open = false" style="display: block; width: 100%; text-align: left; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; background: none; border: none; border-bottom: 1px solid #F3F4F6; cursor: pointer;">External Link</button>
+                            <button type="button" wire:click="addContent('quiz')" @click="open = false" style="display: block; width: 100%; text-align: left; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; background: none; border: none; border-bottom: 1px solid #F3F4F6; cursor: pointer;">Interactive Quiz</button>
+                            <button type="button" wire:click="addContent('live')" @click="open = false" style="display: block; width: 100%; text-align: left; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; background: none; border: none; border-bottom: 1px solid #F3F4F6; cursor: pointer;">Live Class</button>
+                            <button type="button" wire:click="addContent('session')" @click="open = false" style="display: block; width: 100%; text-align: left; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; background: none; border: none; cursor: pointer;">Mentor Session</button>
+                        </div>
+                    </div>
                 @elseif(!$this->canManageCourse && $this->currentCourse->created_by)
                     <a href="{{ route('sessions.index', ['course' => $this->currentCourse->id]) }}" wire:navigate
                        style="background-color: #4F46E5; color: white; text-decoration: none; padding: 0.5rem 1rem; border-radius: 0.375rem; font-weight: 500; display: flex; align-items: center; gap: 0.5rem;">
