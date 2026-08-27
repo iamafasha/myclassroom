@@ -420,6 +420,70 @@
             }
             
             .star-icon { color: #F59E0B; margin-left: 5px; }
+
+            /*
+             * Print: the app is a fixed-height flex shell with its own scrolling
+             * panels, so the browser would otherwise print only the first screenful.
+             * Unclamp the heights, drop the chrome, and let content flow onto pages.
+             */
+            @media print {
+                @page { margin: 1.5cm; }
+
+                html, body {
+                    height: auto !important;
+                    overflow: visible !important;
+                    display: block !important;
+                    padding: 0 !important;
+                    margin: 0 !important;
+                    background: #ffffff !important;
+                }
+
+                /* Navigation chrome and editing controls have no place on paper. */
+                .sidebar,
+                .action-area,
+                .no-print {
+                    display: none !important;
+                }
+
+                /* Only the left rail on screens that have a separate content pane;
+                 * elsewhere .panel-list IS the page body, so it must stay. */
+                .has-nav-panel .panel-list {
+                    display: none !important;
+                }
+
+                .main-layout {
+                    display: block !important;
+                    overflow: visible !important;
+                    height: auto !important;
+                    border: 0 !important;
+                    border-radius: 0 !important;
+                    box-shadow: none !important;
+                }
+
+                .panel-content,
+                .panel-list {
+                    display: block !important;
+                    overflow: visible !important;
+                    height: auto !important;
+                    width: 100% !important;
+                }
+
+                .panel-content { padding: 0 !important; }
+
+                /* Keep a content item whole rather than split across a page break. */
+                .content-card {
+                    break-inside: avoid;
+                    page-break-inside: avoid;
+                    box-shadow: none !important;
+                    transition: none !important;
+                }
+
+                /* Preserve the badge / status colours instead of flattening them. */
+                * {
+                    -webkit-print-color-adjust: exact !important;
+                    print-color-adjust: exact !important;
+                }
+            }
         </style>
 
         @vite(['resources/css/app.css', 'resources/js/app.js'])

@@ -440,7 +440,7 @@ new #[Layout('layouts.app')] class extends Component
 };
 ?>
 
-<div class="main-layout">
+<div class="main-layout has-nav-panel">
     <div class="panel-list p-2">
 
 
@@ -548,7 +548,7 @@ new #[Layout('layouts.app')] class extends Component
 
 
             @if($selectedCourseId && $this->canManageCourse)
-            <div class="mt-4 p-2 w-full flex justify-center">
+            <div class="mt-4 p-2 w-full flex justify-center no-print">
                 <button wire:click="$set('showCreateModuleModal', true)" class="w-full bg-blue-100 text-blue-600 border border-blue-200 rounded p-2 hover:bg-blue-200 transition-colors cursor-pointer" style="font-weight: 500; border: 1px dashed #3b82f6; background: transparent; color: #3b82f6; width: 100%; border-radius: 6px; padding: 8px;">+ Add Module</button>
             </div>
             @endif
@@ -564,7 +564,7 @@ new #[Layout('layouts.app')] class extends Component
                     <h1 class="content-title">{{ $this->currentModule ? $this->currentModule->title : 'No topic selected' }}</h1>
                 </div>
                 @if($this->currentModule && $this->canManageCourse)
-                    <div x-data="{ open: false }" style="position: relative; display: inline-block;">
+                    <div x-data="{ open: false }" class="no-print" style="position: relative; display: inline-block;">
                         <button @click="open = !open" style="background-color: #4F46E5; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; transition: background-color 0.2s;">
                             + Add Content
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" :style="open ? 'transform: rotate(180deg); transition: transform 0.2s;' : 'transition: transform 0.2s;'">
