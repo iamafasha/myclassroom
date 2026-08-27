@@ -244,6 +244,8 @@ new #[Layout('layouts.app')] class extends Component
             }
             $moduleContent->delete();
         }
+
+        unset($this->contents, $this->modules);
     }
 
     public function addContent($type = 'note')
@@ -410,6 +412,7 @@ new #[Layout('layouts.app')] class extends Component
         }
         return Module::where('course_id', $this->selectedCourseId)
             ->with('moduleContents')
+            ->withCount('moduleContents')
             ->orderBy('sort_order', 'asc')
             ->orderBy('id', 'asc')
             ->get();
@@ -505,7 +508,16 @@ new #[Layout('layouts.app')] class extends Component
                         <div class="module-date">{{ $module->startDate()->format('d F') }}</div>
                     </div>
                     <div class="module-body" style="display: flex; justify-content: space-between; align-items: center;">
-                        <div class="module-title">{{ $module->title }}</div>
+                        <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+                            <div class="module-title">{{ $module->title }}</div>
+                            @if($this->canManageCourse)
+                                {{-- Content count, shown to the course owner only. --}}
+                                <span title="{{ $module->module_contents_count }} content item(s) in this module"
+                                      style="flex-shrink: 0; font-size: 11px; font-weight: 600; color: #4B5563; background: #F3F4F6; border: 1px solid #E5E7EB; border-radius: 999px; padding: 1px 8px;">
+                                    {{ $module->module_contents_count }}
+                                </span>
+                            @endif
+                        </div>
                         <div style="display: flex; align-items: center; gap: 4px;">
                             @if($this->canManageCourse)
                             <button type="button" wire:click.stop="moveModuleUp({{ $module->id }})" class="opacity-0 group-hover:opacity-100 transition-opacity" style="background: #F3F4F6; border: none; border-radius: 4px; padding: 4px; cursor: pointer; color: #4B5563; display: flex; align-items: center; justify-content: center;" title="Move Module Up">
@@ -600,6 +612,12 @@ new #[Layout('layouts.app')] class extends Component
                         </svg>
                     </div>
                     @endif
+
+                    {{-- Position of this content within the module; hover shows position and module total. --}}
+                    <div title="Content {{ $loop->iteration }} of {{ $loop->count }} in this module"
+                         style="flex-shrink: 0; width: 24px; height: 24px; border-radius: 9999px; background: #EEF2FF; color: #4338CA; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center;">
+                        {{ $loop->iteration }}
+                    </div>
 
                     <div class="content-info" style="flex: 1;">
                         <div class="content-name" style="{{ $moduleContent->isCompletedFor(auth()->user()) ? 'text-decoration: line-through; color: #6B7280;' : '' }}">
