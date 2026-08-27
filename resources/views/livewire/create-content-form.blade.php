@@ -240,6 +240,20 @@ new #[Layout('layouts.app')] class extends Component
 
     public function updated($name)
     {
+        // Picking a file with no label yet borrows the file's name, so the common case
+        // of "label matches the document" needs no typing. A label already set is left alone.
+        if (in_array($name, ['pdfFileId', 'videoFileId', 'imageFileId'], true) && trim((string) $this->label) === '') {
+            $fileId = $this->{$name};
+
+            if ($fileId) {
+                $file = File::ownedBy(auth()->user())->find($fileId);
+
+                if ($file) {
+                    $this->label = preg_replace('/\.[^.]+$/', '', $file->name);
+                }
+            }
+        }
+
         $pdfPreviewFields = ['pdfStartPage', 'pdfEndPage', 'pdfStartPercentage', 'pdfEndPercentage', 'pdfFileId'];
 
         if ($name === 'type' || ($this->type === 'pdf' && in_array($name, $pdfPreviewFields))) {
@@ -632,7 +646,7 @@ new #[Layout('layouts.app')] class extends Component
             @if($videoSourceType === 'file')
                 <div class="mb-4">
                     <label class="block text-sm font-medium text-gray-700 mb-1">Video File</label>
-                    <x-file-picker model="videoFileId" kind="video" :files="$this->videoFiles" />
+                    <x-file-picker model="videoFileId" kind="video" :files="$this->videoFiles" :live="true" />
                     @error('videoFileId') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
                 </div>
 
@@ -689,7 +703,7 @@ new #[Layout('layouts.app')] class extends Component
             @if($imageSourceType == 'file')
             <div class="mb-4">
                 <label class="block text-sm font-medium text-gray-700 mb-1">Image File</label>
-                <x-file-picker model="imageFileId" kind="image" :files="$this->imageFiles" />
+                <x-file-picker model="imageFileId" kind="image" :files="$this->imageFiles" :live="true" />
                 @error('imageFileId') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
             </div>
             @else
