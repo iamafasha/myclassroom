@@ -6,6 +6,7 @@ use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use App\Models\Course;
 use App\Models\MentorSession;
+use App\Models\User;
 
 new #[Layout('layouts.app')] class extends Component {
     /** 'mine' = sessions I asked for, 'incoming' = sessions asked of me. */
@@ -13,6 +14,16 @@ new #[Layout('layouts.app')] class extends Component {
     public string $tab = 'mine';
 
     public bool $showRequestForm = false;
+
+    /** Mentor-initiated session: the mentor picks a student and offers times up front. */
+    public bool $showInviteForm = false;
+    public $inviteCourseId = '';
+    public $inviteStudentId = '';
+    public string $inviteTopic = '';
+    public string $inviteNote = '';
+    public string $inviteMeetingLink = '';
+    public array $inviteSlotInputs = [''];
+    public int $inviteDurationMinutes = 30;
 
     // Request form (student side).
     public $courseId = '';
@@ -43,6 +54,36 @@ new #[Layout('layouts.app')] class extends Component {
     public function requestableCourses()
     {
         return Course::sessionRequestableBy(auth()->user())->with('creator')->orderBy('title')->get();
+    }
+
+    /** Courses I own, so I can start a session with one of their students. */
+    #[Computed]
+    public function mentoredCourses()
+    {
+        return Course::managedBy(auth()->user())->with('classrooms')->orderBy('title')->get();
+    }
+
+    /** Students I can invite: people in a class the chosen course is taught in. */
+    #[Computed]
+    public function invitableStudents()
+    {
+        $course = $this->mentoredCourses->firstWhere('id', (int) $this->inviteCourseId);
+
+        if (! $course) {
+            return collect();
+        }
+
+        $classroomIds = $course->classrooms->pluck('id');
+
+        if ($classroomIds->isEmpty()) {
+            return collect();
+        }
+
+        return User::whereHas('classrooms', fn ($q) => $q->whereIn('classrooms.id', $classroomIds))
+            ->where('id', '!=', auth()->id())
+            ->orderBy('name')
+            ->orderBy('email')
+            ->get();
     }
 
     #[Computed]
@@ -116,6 +157,108 @@ new #[Layout('layouts.app')] class extends Component {
         unset($this->myRequests);
         $this->tab = 'mine';
         session()->flash('success', 'Session requested. ' . $course->creator?->name . ' will get back to you with times.');
+    }
+
+    public function openInviteForm()
+    {
+        $this->resetValidation();
+        $this->reset(['inviteStudentId', 'inviteTopic', 'inviteNote', 'inviteMeetingLink']);
+        $this->inviteSlotInputs = [''];
+        $this->inviteDurationMinutes = 30;
+        $this->showInviteForm = true;
+    }
+
+    public function updatedInviteCourseId()
+    {
+        // A course change invalidates whoever was picked from the old course's roster.
+        $this->inviteStudentId = '';
+        unset($this->invitableStudents);
+    }
+
+    public function addInviteSlot()
+    {
+        if (count($this->inviteSlotInputs) < 5) {
+            $this->inviteSlotInputs[] = '';
+        }
+    }
+
+    public function removeInviteSlot($index)
+    {
+        unset($this->inviteSlotInputs[$index]);
+        $this->inviteSlotInputs = array_values($this->inviteSlotInputs);
+
+        if ($this->inviteSlotInputs === []) {
+            $this->inviteSlotInputs = [''];
+        }
+    }
+
+    /**
+     * The mentor starts a session: picks a student on one of their courses,
+     * names a topic and offers times. The student books it by picking a slot,
+     * the same as a session they requested themselves.
+     */
+    public function inviteToSession()
+    {
+        $this->inviteSlotInputs = array_values(array_filter(
+            $this->inviteSlotInputs,
+            fn ($slot) => trim((string) $slot) !== ''
+        ));
+
+        $this->validate([
+            'inviteCourseId' => 'required|integer',
+            'inviteStudentId' => 'required|integer',
+            'inviteTopic' => 'required|string|max:255',
+            'inviteNote' => 'nullable|string|max:2000',
+            'inviteMeetingLink' => 'nullable|url|max:255',
+            'inviteDurationMinutes' => 'required|integer|min:15|max:240',
+            'inviteSlotInputs' => 'required|array|min:1|max:5',
+            'inviteSlotInputs.*' => 'required|date|after:now',
+        ], [
+            'inviteCourseId.required' => 'Pick one of your courses.',
+            'inviteStudentId.required' => 'Pick the student to invite.',
+            'inviteSlotInputs.required' => 'Offer the student at least one time.',
+            'inviteSlotInputs.min' => 'Offer the student at least one time.',
+            'inviteSlotInputs.*.required' => 'Fill in this time or remove the row.',
+            'inviteSlotInputs.*.after' => 'Times must be in the future.',
+        ]);
+
+        // Re-check ownership and the student's enrolment at write time.
+        $course = Course::managedBy(auth()->user())->findOrFail($this->inviteCourseId);
+
+        $classroomIds = $course->classrooms()->pluck('classrooms.id');
+
+        $student = User::whereKey($this->inviteStudentId)
+            ->whereHas('classrooms', fn ($q) => $q->whereIn('classrooms.id', $classroomIds))
+            ->firstOrFail();
+
+        $slots = collect($this->inviteSlotInputs)
+            ->map(fn ($slot) => \Illuminate\Support\Carbon::parse($slot)->format('Y-m-d H:i:00'))
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
+
+        $session = MentorSession::create([
+            'course_id' => $course->id,
+            'student_id' => $student->id,
+            'mentor_id' => auth()->id(),
+            'topic' => $this->inviteTopic,
+            'mentor_note' => $this->inviteNote ?: null,
+            'meeting_link' => $this->inviteMeetingLink ?: null,
+            'duration_minutes' => $this->inviteDurationMinutes,
+            'proposed_slots' => $slots,
+            'status' => MentorSession::STATUS_PROPOSED,
+        ]);
+
+        $this->reset([
+            'showInviteForm', 'inviteCourseId', 'inviteStudentId',
+            'inviteTopic', 'inviteNote', 'inviteMeetingLink',
+        ]);
+        $this->inviteSlotInputs = [''];
+        $this->inviteDurationMinutes = 30;
+        unset($this->incoming, $this->pendingIncomingCount);
+        $this->tab = 'incoming';
+        session()->flash('success', 'Session invitation sent to ' . $student->displayName() . '. They will pick one of your times.');
     }
 
     public function cancelRequest($sessionId)
@@ -264,14 +407,26 @@ new #[Layout('layouts.app')] class extends Component {
             <h1 style="margin: 0 0 4px; font-size: 26px; font-weight: 800; color: #111827;">Sessions</h1>
             <p style="margin: 0; font-size: 14px; color: #6B7280;">One-to-one time with the mentor who owns a course.</p>
         </div>
-        <button wire:click="openRequestForm"
-                style="background-color: #2563EB; color: white; border: none; border-radius: 9px; padding: 11px 22px; font-size: 14px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 7px; transition: background-color 0.2s;"
-                onmouseover="this.style.backgroundColor='#1D4ED8'" onmouseout="this.style.backgroundColor='#2563EB'">
-            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-            </svg>
-            Request Session
-        </button>
+        <div style="display: flex; align-items: center; gap: 10px;">
+            @if($this->mentoredCourses->isNotEmpty())
+                <button wire:click="openInviteForm"
+                        style="background-color: white; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 9px; padding: 11px 20px; font-size: 14px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 7px; transition: background-color 0.2s;"
+                        onmouseover="this.style.backgroundColor='#EFF6FF'" onmouseout="this.style.backgroundColor='white'">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path>
+                    </svg>
+                    Start a Session
+                </button>
+            @endif
+            <button wire:click="openRequestForm"
+                    style="background-color: #2563EB; color: white; border: none; border-radius: 9px; padding: 11px 22px; font-size: 14px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 7px; transition: background-color 0.2s;"
+                    onmouseover="this.style.backgroundColor='#1D4ED8'" onmouseout="this.style.backgroundColor='#2563EB'">
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                </svg>
+                Request Session
+            </button>
+        </div>
     </div>
 
     <!-- Request form modal (student) -->
@@ -360,6 +515,133 @@ new #[Layout('layouts.app')] class extends Component {
                     </div>
                 </form>
             @endif
+        </div>
+    </div>
+    @endif
+
+    <!-- Start-a-session modal (mentor) -->
+    @if($showInviteForm)
+    <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 20px;" wire:click.self="$set('showInviteForm', false)">
+        <div style="background: white; border-radius: 16px; padding: 36px; width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.2);" wire:click.stop>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <h2 style="margin: 0; font-size: 20px; font-weight: 700; color: #111827;">Start a Session</h2>
+                <button wire:click="$set('showInviteForm', false)" style="background: none; border: none; cursor: pointer; color: #6B7280; padding: 4px;">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <p style="margin: 0 0 24px; font-size: 12px; color: #9CA3AF;">Invite a student on one of your courses. They pick one of your times and that books the session.</p>
+
+            <form wire:submit="inviteToSession" style="display: flex; flex-direction: column; gap: 18px;">
+                <div>
+                    <label style="display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px;">Course</label>
+                    <select wire:model.live="inviteCourseId" class="select-styled" style="background: white;">
+                        <option value="">Select a course...</option>
+                        @foreach($this->mentoredCourses as $course)
+                            <option value="{{ $course->id }}">{{ $course->title }}</option>
+                        @endforeach
+                    </select>
+                    @error('inviteCourseId') <span style="color: #EF4444; font-size: 12px; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
+                </div>
+
+                <div>
+                    <label style="display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px;">Student</label>
+                    <select wire:model="inviteStudentId" class="select-styled" style="background: white;" @disabled(! $inviteCourseId || $this->invitableStudents->isEmpty())>
+                        <option value="">
+                            @if(! $inviteCourseId)
+                                Pick a course first...
+                            @elseif($this->invitableStudents->isEmpty())
+                                No students in this course's classes yet
+                            @else
+                                Select a student...
+                            @endif
+                        </option>
+                        @foreach($this->invitableStudents as $student)
+                            <option value="{{ $student->id }}">{{ $student->displayName() }} — {{ $student->email }}</option>
+                        @endforeach
+                    </select>
+                    @error('inviteStudentId') <span style="color: #EF4444; font-size: 12px; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
+                </div>
+
+                <div>
+                    <label style="display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px;">Topic</label>
+                    <input wire:model="inviteTopic" type="text" placeholder="e.g. Go over your project plan"
+                           style="width: 100%; padding: 11px 14px; border: 1px solid #D1D5DB; border-radius: 8px; font-size: 14px; outline: none; box-sizing: border-box;"
+                           onfocus="this.style.borderColor='#2563EB'" onblur="this.style.borderColor='#D1D5DB'">
+                    @error('inviteTopic') <span style="color: #EF4444; font-size: 12px; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
+                </div>
+
+                <div>
+                    <label style="display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px;">Available times</label>
+                    <div style="display: flex; flex-direction: column; gap: 10px;">
+                        @foreach($inviteSlotInputs as $index => $slot)
+                            <div wire:key="invite-slot-{{ $index }}">
+                                <div style="display: flex; gap: 8px; align-items: center;">
+                                    <input wire:model="inviteSlotInputs.{{ $index }}" type="datetime-local"
+                                           style="flex: 1; padding: 10px 14px; border: 1px solid #D1D5DB; border-radius: 8px; font-size: 14px; outline: none; box-sizing: border-box;">
+                                    @if(count($inviteSlotInputs) > 1)
+                                        <button type="button" wire:click="removeInviteSlot({{ $index }})" title="Remove this time"
+                                                style="background: none; border: none; cursor: pointer; color: #9CA3AF; padding: 6px; display: flex;">
+                                            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                        </button>
+                                    @endif
+                                </div>
+                                @error('inviteSlotInputs.' . $index) <span style="color: #EF4444; font-size: 12px; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
+                            </div>
+                        @endforeach
+                    </div>
+                    @error('inviteSlotInputs') <span style="color: #EF4444; font-size: 12px; display: block; margin-top: 6px;">{{ $message }}</span> @enderror
+
+                    @if(count($inviteSlotInputs) < 5)
+                        <button type="button" wire:click="addInviteSlot"
+                                style="margin-top: 10px; background: none; border: 1px dashed #93C5FD; color: #2563EB; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer;">
+                            + Add another time
+                        </button>
+                    @endif
+                </div>
+
+                <div>
+                    <label style="display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px;">Length</label>
+                    <select wire:model="inviteDurationMinutes" class="select-styled" style="background: white;">
+                        <option value="15">15 min</option>
+                        <option value="30">30 min</option>
+                        <option value="45">45 min</option>
+                        <option value="60">1 hour</option>
+                        <option value="90">1.5 hours</option>
+                    </select>
+                    @error('inviteDurationMinutes') <span style="color: #EF4444; font-size: 12px; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
+                </div>
+
+                <div>
+                    <label style="display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px;">Meeting link <span style="font-weight: 400; color: #9CA3AF;">(optional)</span></label>
+                    <input wire:model="inviteMeetingLink" type="url" placeholder="https://meet.google.com/..."
+                           style="width: 100%; padding: 11px 14px; border: 1px solid #D1D5DB; border-radius: 8px; font-size: 14px; outline: none; box-sizing: border-box;"
+                           onfocus="this.style.borderColor='#2563EB'" onblur="this.style.borderColor='#D1D5DB'">
+                    @error('inviteMeetingLink') <span style="color: #EF4444; font-size: 12px; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
+                </div>
+
+                <div>
+                    <label style="display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px;">Note to student <span style="font-weight: 400; color: #9CA3AF;">(optional)</span></label>
+                    <textarea wire:model="inviteNote" rows="3" placeholder="Anything they should prepare or bring."
+                              style="width: 100%; padding: 11px 14px; border: 1px solid #D1D5DB; border-radius: 8px; font-size: 14px; outline: none; box-sizing: border-box; font-family: inherit; resize: vertical;"
+                              onfocus="this.style.borderColor='#2563EB'" onblur="this.style.borderColor='#D1D5DB'"></textarea>
+                    @error('inviteNote') <span style="color: #EF4444; font-size: 12px; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
+                </div>
+
+                <div style="display: flex; gap: 12px;">
+                    <button type="button" wire:click="$set('showInviteForm', false)"
+                            style="flex: 1; padding: 11px; border: 1px solid #D1D5DB; border-radius: 8px; background: white; font-size: 14px; font-weight: 600; color: #374151; cursor: pointer;">
+                        Cancel
+                    </button>
+                    <button type="submit"
+                            style="flex: 1; padding: 11px; border: none; border-radius: 8px; background: #2563EB; font-size: 14px; font-weight: 600; color: white; cursor: pointer;">
+                        Send Invitation
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
     @endif
@@ -641,6 +923,11 @@ new #[Layout('layouts.app')] class extends Component {
                     <button wire:click="openRequestForm"
                             style="background-color: #2563EB; color: white; border: none; border-radius: 8px; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer;">
                         Request a Session
+                    </button>
+                @elseif($tab === 'incoming' && $this->mentoredCourses->isNotEmpty())
+                    <button wire:click="openInviteForm"
+                            style="background-color: #2563EB; color: white; border: none; border-radius: 8px; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer;">
+                        Start a Session
                     </button>
                 @endif
             </div>

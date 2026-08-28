@@ -15,6 +15,11 @@ new #[Layout('layouts.app')] class extends Component {
     /** Public classes show up in Discover and anyone may join them. */
     public bool $is_public = false;
 
+    /** Id of the class whose title is being edited inline, or null. */
+    public ?int $editingId = null;
+
+    public string $editingTitle = '';
+
     /** Which list is on screen: 'mine', 'attending' or 'discover'. */
     #[Url]
     public string $tab = 'mine';
@@ -92,6 +97,41 @@ new #[Layout('layouts.app')] class extends Component {
 
         unset($this->attendingClassrooms, $this->discoverableClassrooms);
         session()->flash('success', 'You have joined ' . $classroom->title . '.');
+    }
+
+    public function startEditing(int $classroomId)
+    {
+        $classroom = Classroom::findOrFail($classroomId);
+
+        abort_unless($classroom->isAdministeredBy(auth()->user()), 403, 'You do not manage this class.');
+
+        $this->editingId = $classroom->id;
+        $this->editingTitle = $classroom->title;
+        $this->resetValidation();
+    }
+
+    public function cancelEditing()
+    {
+        $this->reset(['editingId', 'editingTitle']);
+        $this->resetValidation();
+    }
+
+    /** Rename a class I administer. */
+    public function updateClassroom()
+    {
+        $classroom = Classroom::findOrFail($this->editingId);
+
+        abort_unless($classroom->isAdministeredBy(auth()->user()), 403, 'You do not manage this class.');
+
+        $validated = $this->validate([
+            'editingTitle' => 'required|string|max:255',
+        ]);
+
+        $classroom->update(['title' => trim($validated['editingTitle'])]);
+
+        $this->reset(['editingId', 'editingTitle']);
+        unset($this->classrooms);
+        session()->flash('success', 'Class renamed successfully.');
     }
 
     /** Soft delete a class I administer; attendees and courses stay attached. */
@@ -334,6 +374,18 @@ new #[Layout('layouts.app')] class extends Component {
                          onmouseout="this.style.boxShadow='none'; this.style.borderColor='#E5E7EB';">
 
                         <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 15px;">
+                            @if($editingId === $classroom->id)
+                                <form wire:submit="updateClassroom" style="flex: 1; min-width: 0;">
+                                    <div style="display: flex; gap: 6px;">
+                                        <input type="text" wire:model="editingTitle" autofocus
+                                               wire:keydown.escape="cancelEditing"
+                                               style="flex: 1; min-width: 0; padding: 6px 8px; border-radius: 6px; border: 1px solid #A5B4FC; font-size: 14px; font-weight: 700; outline: none;">
+                                        <button type="submit" title="Save" style="background: #2563EB; border: none; color: white; border-radius: 6px; padding: 0 10px; cursor: pointer; font-size: 12px; font-weight: 600;">Save</button>
+                                        <button type="button" wire:click="cancelEditing" title="Cancel" style="background: white; border: 1px solid #D1D5DB; color: #4B5563; border-radius: 6px; padding: 0 10px; cursor: pointer; font-size: 12px; font-weight: 600;">Cancel</button>
+                                    </div>
+                                    @error('editingTitle') <span style="color: #EF4444; font-size: 11px; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
+                                </form>
+                            @else
                             <a href="{{ route('classes.show', $classroom->id) }}" wire:navigate style="text-decoration: none; flex: 1; min-width: 0;">
                                 <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: #111827;">{{ $classroom->title }}</h3>
                             </a>
@@ -343,6 +395,14 @@ new #[Layout('layouts.app')] class extends Component {
                                 @else
                                     <span class="badge" style="background-color: #F3F4F6; color: #4B5563; border: 1px solid #E5E7EB;">Private</span>
                                 @endif
+                                <button type="button" wire:click="startEditing({{ $classroom->id }})"
+                                        title="Rename class"
+                                        style="background: none; border: none; cursor: pointer; color: #6B7280; padding: 4px; line-height: 0; opacity: 0.6; transition: opacity 0.2s;"
+                                        onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'">
+                                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                                    </svg>
+                                </button>
                                 <button type="button" wire:click="deleteClassroom({{ $classroom->id }})"
                                         wire:confirm="Delete &quot;{{ $classroom->title }}&quot;? Attendees will lose access to its courses."
                                         title="Delete class"
@@ -353,6 +413,7 @@ new #[Layout('layouts.app')] class extends Component {
                                     </svg>
                                 </button>
                             </div>
+                            @endif
                         </div>
 
                         <a href="{{ route('classes.show', $classroom->id) }}" wire:navigate style="display: flex; text-decoration: none; align-items: center; gap: 16px; margin-top: 15px; padding-top: 15px; border-top: 1px solid #F3F4F6;">

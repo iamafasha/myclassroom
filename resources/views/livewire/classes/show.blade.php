@@ -3,11 +3,12 @@
 use Livewire\Volt\Component;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Validate;
 use App\Models\Classroom;
 use App\Models\Course;
 
 new #[Layout('layouts.app')] class extends Component {
-    
+
     public Classroom $classroom;
 
     /** Addresses staged as chips, waiting to be invited. */
@@ -15,11 +16,46 @@ new #[Layout('layouts.app')] class extends Component {
 
     public string $inviteInput = '';
 
+    /** Inline edit of the class title. */
+    public bool $editingTitle = false;
+
+    #[Validate('required|string|max:255')]
+    public string $title = '';
+
     public function mount(Classroom $classroom)
     {
         abort_unless($classroom->admin_id === auth()->id(), 403, 'You do not manage this class.');
 
         $this->classroom = $classroom;
+        $this->title = $classroom->title;
+    }
+
+    public function startEditingTitle(): void
+    {
+        $this->title = $this->classroom->title;
+        $this->resetValidation('title');
+        $this->editingTitle = true;
+    }
+
+    public function cancelEditingTitle(): void
+    {
+        $this->title = $this->classroom->title;
+        $this->resetValidation('title');
+        $this->editingTitle = false;
+    }
+
+    /** Rename the class. */
+    public function updateTitle(): void
+    {
+        abort_unless($this->classroom->isAdministeredBy(auth()->user()), 403, 'You do not manage this class.');
+
+        $this->validateOnly('title');
+
+        $this->classroom->update(['title' => trim($this->title)]);
+        $this->title = $this->classroom->title;
+        $this->editingTitle = false;
+
+        session()->flash('success_visibility', 'Class name updated.');
     }
 
     #[Computed]
@@ -173,7 +209,29 @@ new #[Layout('layouts.app')] class extends Component {
         </a>
         <div style="display: flex; justify-content: space-between; align-items: flex-end;">
             <div>
-                <h1 style="margin: 0 0 8px 0; font-size: 28px; font-weight: 800; color: #111827;">{{ $classroom->title }}</h1>
+                @if($editingTitle)
+                    <form wire:submit="updateTitle" style="display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px;">
+                        <div>
+                            <input type="text" wire:model="title" autofocus
+                                   wire:keydown.escape="cancelEditingTitle"
+                                   style="font-size: 24px; font-weight: 800; color: #111827; padding: 4px 8px; border: 1px solid #A5B4FC; border-radius: 6px; outline: none; min-width: 320px;">
+                            @error('title') <span style="display: block; color: #EF4444; font-size: 12px; font-weight: 500; margin-top: 4px;">{{ $message }}</span> @enderror
+                        </div>
+                        <button type="submit" class="btn-solve" style="background-color: #4F46E5; padding: 8px 14px; font-size: 13px;">Save</button>
+                        <button type="button" wire:click="cancelEditingTitle" style="background: white; border: 1px solid #D1D5DB; color: #4B5563; font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 8px; cursor: pointer;">Cancel</button>
+                    </form>
+                @else
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                        <h1 style="margin: 0; font-size: 28px; font-weight: 800; color: #111827;">{{ $classroom->title }}</h1>
+                        <button type="button" wire:click="startEditingTitle" title="Rename class"
+                                style="background: none; border: none; cursor: pointer; color: #6B7280; padding: 4px; line-height: 0; opacity: 0.6; transition: opacity 0.2s;"
+                                onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'">
+                            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                            </svg>
+                        </button>
+                    </div>
+                @endif
                 <div style="display: flex; gap: 15px; font-size: 13px; color: #6B7280; align-items: center;">
                     <span style="display: flex; align-items: center; gap: 6px;">
                         <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
