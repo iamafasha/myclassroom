@@ -326,6 +326,16 @@ new #[Layout('layouts.app')] class extends Component
 
 <div class="panel-list content-read" style="width: 100%; padding: 40px; overflow-y: auto;">
     <style>
+        /* An image must not overflow its column; declared before the mobile
+           block below so the full-bleed overrides there win the cascade. */
+        .content-read .cs-image img {
+            display: block;
+            max-width: 100%;
+            height: auto;
+            margin: 0 auto;
+            border-radius: 8px;
+        }
+
         /* Reading view: tighten the owner controls and the completion footer so
            they stay usable on a phone instead of eating half the screen. */
         @media (max-width: 820px) {
@@ -351,6 +361,41 @@ new #[Layout('layouts.app')] class extends Component
             }
             .content-read .cs-footer form button,
             .content-read .cs-footer > a { justify-content: center; }
+
+            /* Media blocks (PDF, video, image) run edge-to-edge on a phone.
+               The reading view's 16px side padding plus the content card's own
+               16px is cancelled out, so the full screen width goes to the
+               content instead of to gutters. Keep this offset in step with
+               those two paddings if either ever changes. */
+            .content-read .cs-bleed {
+                margin-left: -32px;
+                margin-right: -32px;
+                width: auto;
+                max-width: none;
+            }
+            /* Edge-to-edge means no side chrome: rounded corners and side
+               borders only read as damage once the block touches the screen. */
+            .content-read .cs-bleed,
+            .content-read .cs-bleed .video-frame-inner,
+            .content-read .cs-bleed .video-player,
+            .content-read .cs-bleed img {
+                border-radius: 0;
+                border-left: 0;
+                border-right: 0;
+            }
+            /* A player that goes fullscreen must not keep the bleed offset, or it
+               sits 32px off-screen. Kept as separate rules: an unrecognised
+               prefixed pseudo-class would invalidate a combined selector list. */
+            .content-read .cs-bleed:fullscreen { margin: 0; }
+            .content-read .cs-bleed:-webkit-full-screen { margin: 0; }
+
+            /* Images fill the bleed width and scale by their own aspect ratio. */
+            .content-read .cs-bleed img {
+                display: block;
+                width: 100%;
+                max-width: none;
+                height: auto;
+            }
         }
     </style>
     <div class="content-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -485,6 +530,7 @@ new #[Layout('layouts.app')] class extends Component
 
                 @once
                     <style>
+                        .pdfv-block { position: relative; }
                         .pdfv-toolbar {
                             display: flex; justify-content: center; align-items: center; gap: 8px;
                             flex-wrap: wrap; margin-bottom: 12px; padding: 8px 10px;
@@ -509,6 +555,20 @@ new #[Layout('layouts.app')] class extends Component
                             font-variant-numeric: tabular-nums; white-space: nowrap;
                         }
                         .pdfv-hint { font-size: 0.75rem; color: #6B7280; margin-left: 4px; }
+                        .pdfv-close {
+                            display: none; margin-left: auto; width: 26px; height: 26px;
+                            align-items: center; justify-content: center; padding: 0;
+                            background: white; border: 1px solid #D1D5DB; border-radius: 999px;
+                            cursor: pointer; color: #6B7280; font-size: 0.8rem; line-height: 1;
+                            -webkit-tap-highlight-color: transparent;
+                        }
+                        .pdfv-toggle {
+                            display: none; align-items: center; gap: 6px; position: absolute;
+                            top: 8px; right: 8px; z-index: 9; padding: 6px 10px; border: none;
+                            background: rgba(17,24,39,0.72); color: #fff; border-radius: 999px;
+                            font-size: 0.75rem; font-weight: 600; cursor: pointer;
+                            -webkit-tap-highlight-color: transparent;
+                        }
                         .pdfv-wrapper {
                             width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch;
                             background: #F3F4F6; border-radius: 8px; border: 1px solid #E5E7EB;
@@ -520,37 +580,64 @@ new #[Layout('layouts.app')] class extends Component
                             gap: 16px; padding: 16px;
                         }
                         .pdfv-status { color: #6B7280; font-weight: 500; padding: 24px 8px; }
-                        @media (max-width: 640px) {
-                            .pdfv-pages { padding: 8px; gap: 10px; }
-                            .pdfv-hint { width: 100%; text-align: center; margin: 2px 0 0; }
+                        /* Matches the reading view's mobile breakpoint, where .cs-bleed
+                           takes the block edge-to-edge. The toolbar then stays out of the
+                           way until it's asked for instead of permanently eating height. */
+                        @media (max-width: 820px) {
+                            .pdfv-toolbar {
+                                display: none; position: absolute; top: 8px; left: 8px; right: 8px;
+                                margin: 0; box-shadow: 0 8px 20px -6px rgba(0,0,0,0.35); z-index: 10;
+                            }
+                            .pdfv-toolbar.pdfv-open { display: flex; }
+                            .pdfv-hint { display: none; }
+                            .pdfv-close { display: inline-flex; }
+                            .pdfv-toggle { display: inline-flex; }
+                            .pdfv-toggle.pdfv-hidden { display: none; }
+                            .pdfv-wrapper { border-radius: 0; border-left: none; border-right: none; }
+                            .pdfv-pages { padding: 6px 4px; gap: 8px; }
+                            .pdfv-sizer { min-width: 100%; }
                         }
                     </style>
                 @endonce
 
-                <div class="pdfv-toolbar" id="pdf-toolbar-{{ $uid }}">
-                    <button type="button" class="pdfv-btn" id="zoom-out-{{ $uid }}" aria-label="Zoom out">&minus;</button>
-                    <span class="pdfv-level" id="zoom-level-{{ $uid }}">100%</span>
-                    <button type="button" class="pdfv-btn" id="zoom-in-{{ $uid }}" aria-label="Zoom in">+</button>
-                    <button type="button" class="pdfv-btn" id="zoom-fit-{{ $uid }}">Fit width</button>
-                    <span class="pdfv-pageno" id="pdf-pageno-{{ $uid }}">Page &ndash;</span>
-                    <span class="pdfv-hint">Pinch to zoom &middot; double&#8209;tap to toggle</span>
-                </div>
+                <div class="pdfv-block cs-bleed" id="pdf-block-{{ $uid }}">
+                    <div class="pdfv-toolbar" id="pdf-toolbar-{{ $uid }}">
+                        <button type="button" class="pdfv-btn" id="zoom-out-{{ $uid }}" aria-label="Zoom out">&minus;</button>
+                        <span class="pdfv-level" id="zoom-level-{{ $uid }}">100%</span>
+                        <button type="button" class="pdfv-btn" id="zoom-in-{{ $uid }}" aria-label="Zoom in">+</button>
+                        <button type="button" class="pdfv-btn" id="zoom-fit-{{ $uid }}">Fit width</button>
+                        <span class="pdfv-pageno" id="pdf-pageno-{{ $uid }}">Page &ndash;</span>
+                        <span class="pdfv-hint">Pinch to zoom &middot; double&#8209;tap to toggle</span>
+                        <button type="button" class="pdfv-close" id="pdf-toolbar-close-{{ $uid }}" aria-label="Hide zoom controls">&times;</button>
+                    </div>
 
-                <div class="pdfv-wrapper" id="pdf-wrapper-{{ $uid }}">
-                    <div class="pdfv-sizer" id="pdf-sizer-{{ $uid }}">
-                        <div class="pdfv-pages" id="pdf-container-{{ $uid }}">
-                            <p class="pdfv-status" id="pdf-loading-{{ $uid }}">Loading PDF pages...</p>
+                    <button type="button" class="pdfv-toggle" id="pdf-toolbar-toggle-{{ $uid }}" aria-label="Show zoom controls">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0zM11 8v6M8 11h6" />
+                        </svg>
+                        Zoom
+                    </button>
+
+                    <div class="pdfv-wrapper" id="pdf-wrapper-{{ $uid }}">
+                        <div class="pdfv-sizer" id="pdf-sizer-{{ $uid }}">
+                            <div class="pdfv-pages" id="pdf-container-{{ $uid }}">
+                                <p class="pdfv-status" id="pdf-loading-{{ $uid }}">Loading PDF pages...</p>
+                            </div>
                         </div>
                     </div>
                 </div>
 
                 <script>
                     (function() {
+                        const toolbarEl = document.getElementById('pdf-toolbar-{{ $uid }}');
+                        const toggleEl = document.getElementById('pdf-toolbar-toggle-{{ $uid }}');
+                        const wrapperEl = document.getElementById('pdf-wrapper-{{ $uid }}');
+
                         const viewer = window.createPdfViewer({
-                            wrapper: document.getElementById('pdf-wrapper-{{ $uid }}'),
+                            wrapper: wrapperEl,
                             sizer: document.getElementById('pdf-sizer-{{ $uid }}'),
                             container: document.getElementById('pdf-container-{{ $uid }}'),
-                            toolbar: document.getElementById('pdf-toolbar-{{ $uid }}'),
+                            toolbar: toolbarEl,
                             levelEl: document.getElementById('zoom-level-{{ $uid }}'),
                             pageNoEl: document.getElementById('pdf-pageno-{{ $uid }}')
                         });
@@ -577,6 +664,23 @@ new #[Layout('layouts.app')] class extends Component
 
                         document.getElementById('zoom-fit-{{ $uid }}').addEventListener('click', function() {
                             viewer.fitWidth();
+                        });
+
+                        // On narrow screens the toolbar stays out of the way behind this toggle
+                        // until it's actually needed, so the page gets the full screen width.
+                        function openToolbar() {
+                            toolbarEl.classList.add('pdfv-open');
+                            toggleEl.classList.add('pdfv-hidden');
+                        }
+                        function closeToolbar() {
+                            toolbarEl.classList.remove('pdfv-open');
+                            toggleEl.classList.remove('pdfv-hidden');
+                        }
+                        toggleEl.addEventListener('click', openToolbar);
+                        document.getElementById('pdf-toolbar-close-{{ $uid }}').addEventListener('click', closeToolbar);
+                        // Tapping the page itself dismisses an open toolbar.
+                        wrapperEl.addEventListener('click', function() {
+                            if (toolbarEl.classList.contains('pdfv-open')) closeToolbar();
                         });
                     })();
                 </script>
@@ -622,11 +726,20 @@ new #[Layout('layouts.app')] class extends Component
                         @media (max-width: 640px) {
                             .video-player-volume-wrap:hover .video-player-volume { width: 0; opacity: 0; }
                         }
+                        @media (max-width: 820px) {
+                            /* Full-bleed on a phone: drop the desktop width cap and the
+                               shadow, and let the frame use the whole screen width. The
+                               70vh height cap goes too — width is the scarce axis here. */
+                            .video-frame { max-width: none; }
+                            .video-frame-inner { box-shadow: none; }
+                            .video-player { max-height: none; box-shadow: none; }
+                            .video-player video { max-height: none; }
+                        }
                     </style>
                 @endonce
 
                 @if($youtubeId)
-                    <div class="video-frame">
+                    <div class="video-frame cs-bleed">
                         <div class="video-frame-inner">
                             <div id="yt-player-{{ $uid }}"></div>
                         </div>
@@ -723,7 +836,7 @@ new #[Layout('layouts.app')] class extends Component
                         })();
                     </script>
                 @else
-                    <div class="video-player" id="video-container-{{ $uid }}" tabindex="0">
+                    <div class="video-player cs-bleed" id="video-container-{{ $uid }}" tabindex="0">
                         <video id="course-video-{{ $uid }}" playsinline preload="metadata">
                             <source src="{{ $videoUrl }}">
                             Your browser does not support the video tag.
@@ -1164,7 +1277,7 @@ new #[Layout('layouts.app')] class extends Component
                 <!-- Each viewer gets their own session on this block, managed inside the panel. -->
                 <livewire:sessions.content-panel :session-content="$contentable->id" :key="'session-panel-' . $contentable->id" />
             @elseif($type == 'ImageContent')
-                <div>
+                <div class="cs-image cs-bleed">
                     <img src="{{ $contentable->file_url }}" alt="{{ $contentable->name }}">
                 </div>
             @else
