@@ -422,6 +422,157 @@
             .star-icon { color: #F59E0B; margin-left: 5px; }
 
             /*
+             * Phones / small tablets: the desktop shell is a horizontal flex with a
+             * fixed side rail and non-scrolling body. Re-flow it into a vertical stack
+             * with the rail as a bottom navigation bar, and let the two-pane inner
+             * layouts stack instead of sitting side by side.
+             */
+            @media (max-width: 820px) {
+                body {
+                    flex-direction: column;
+                    padding: 0;
+                    gap: 0;
+                    height: 100svh;
+                }
+
+                .main-layout {
+                    order: 1;
+                    flex: 1;
+                    min-height: 0;
+                    flex-direction: column;
+                    overflow-y: auto;
+                    border-radius: 0;
+                    box-shadow: none;
+                }
+
+                /* Side rail -> bottom bar. */
+                .sidebar {
+                    order: 2;
+                    width: 100%;
+                    flex-direction: row;
+                    justify-content: space-around;
+                    align-items: center;
+                    border-radius: 0;
+                    border-top: 1px solid var(--border-color);
+                    padding: 4px 6px;
+                    padding-bottom: calc(4px + env(safe-area-inset-bottom));
+                    box-shadow: 0 -1px 3px rgba(16, 24, 40, 0.08);
+                    overflow-x: auto;
+                }
+
+                .sidebar-logo { display: none; }
+
+                .sidebar-nav {
+                    flex-direction: row;
+                    gap: 2px;
+                    flex: 1;
+                    justify-content: space-around;
+                }
+
+                .sidebar-footer {
+                    flex-direction: row;
+                    margin-top: 0;
+                    padding-top: 0;
+                    gap: 2px;
+                }
+
+                .sidebar-item { width: 40px; height: 40px; }
+
+                /* Two-pane inner layouts stack vertically. */
+                .panel-list,
+                .panel-content {
+                    width: 100% !important;
+                    flex: none;
+                }
+
+                /* On a course page the module rail is a capped, scrollable strip
+                   above the reading pane; the page as a whole scrolls. */
+                .has-nav-panel {
+                    display: block;
+                    overflow-y: auto;
+                }
+
+                .has-nav-panel .panel-list {
+                    height: auto;
+                    max-height: 42vh;
+                    border-right: none;
+                    border-bottom: 1px solid var(--border-color);
+                }
+
+                .has-nav-panel .panel-content {
+                    height: auto;
+                    padding: 18px 16px 40px !important;
+                }
+
+                /* Standalone reading view (content-show) fills the width with
+                   comfortable page margins instead of the desktop 40px. */
+                .panel-list[style*="padding: 40px"] { padding: 18px 16px 40px !important; }
+
+                .content-title { font-size: 20px; }
+
+                .content-header {
+                    flex-wrap: wrap;
+                    gap: 12px;
+                }
+
+                .tabs-container {
+                    gap: 16px;
+                    overflow-x: auto;
+                    -webkit-overflow-scrolling: touch;
+                    margin-bottom: 20px;
+                }
+
+                .content-card { padding: 16px; }
+
+                .content-details { flex-wrap: wrap; }
+
+                /* Course content rows stay a single line: number, title/meta, action.
+                   The drag handle is meaningless on touch, so it goes. */
+                .contents-list .content-card {
+                    align-items: center;
+                    gap: 10px;
+                    padding: 14px;
+                }
+
+                .contents-list .content-card .content-info { flex: 1; min-width: 0; }
+                .contents-list .content-card .action-area { flex-shrink: 0; }
+
+                /* Touch has no hover and no drag: the reorder handle and the
+                   hover-reveal owner tools are desktop-only. The reading list
+                   stays a clean "title -> View" on a phone; structural edits and
+                   per-block Edit/Delete live on the content page and on desktop. */
+                .contents-list .content-card [title="Drag to move to another module"],
+                .contents-list .content-card .opacity-0,
+                .module-card .opacity-0 { display: none !important; }
+
+                .btn-solve,
+                .btn-solved { padding: 10px 16px; }
+
+                /* Views whose root is a side-by-side flex (a fixed-width form/filter
+                   pane next to a list) collapse into a single scrolling column. */
+                .responsive-shell {
+                    flex-direction: column !important;
+                    height: auto !important;
+                    overflow: visible !important;
+                    gap: 0 !important;
+                }
+
+                .responsive-shell > * {
+                    width: 100% !important;
+                    flex: none !important;
+                }
+
+                /* Notifications popover: anchored to the bottom bar, it must not
+                   run off a narrow screen. */
+                .notif-panel {
+                    left: 8px !important;
+                    right: 8px !important;
+                    bottom: 8px !important;
+                    width: auto !important;
+                }
+            }
+
+            /*
              * Print: the app is a fixed-height flex shell with its own scrolling
              * panels, so the browser would otherwise print only the first screenful.
              * Unclamp the heights, drop the chrome, and let content flow onto pages.

@@ -71,7 +71,23 @@ new #[Layout('layouts.app')] class extends Component {
         </div>
     @endif
 
-    <div style="padding: 30px 40px; display: grid; grid-template-columns: 1fr 380px; gap: 30px; align-items: start;">
+    <style>
+        .courses-add-grid {
+            padding: 30px 40px;
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            gap: 30px;
+            align-items: start;
+        }
+        @media (max-width: 820px) {
+            .courses-add-grid {
+                grid-template-columns: 1fr;
+                padding: 20px 16px;
+            }
+        }
+    </style>
+
+    <div class="courses-add-grid">
 
         <!-- Left: Available courses list -->
         <div>

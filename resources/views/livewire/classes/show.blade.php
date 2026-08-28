@@ -286,7 +286,7 @@ new #[Layout('layouts.app')] class extends Component {
         </div>
     @endif
 
-    <div style="padding: 40px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px;">
+    <div style="padding: clamp(16px, 4vw, 40px); display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: clamp(20px, 4vw, 40px);">
         
         <!-- Attendees Section -->
         <div>

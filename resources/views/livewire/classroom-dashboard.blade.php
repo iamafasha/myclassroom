@@ -440,7 +440,82 @@ new #[Layout('layouts.app')] class extends Component
 };
 ?>
 
-<div class="main-layout has-nav-panel">
+<div class="main-layout has-nav-panel" x-data="{ navOpen: false }" :class="{ 'nav-open': navOpen }">
+    <style>
+        /* Phone: the module rail is a drawer toggled from a bar above the content,
+           so the reading pane gets the full screen until the learner asks for the
+           module list. */
+        .dash-mobile-bar { display: none; }
+        .dash-backdrop { display: none; }
+
+        @media (max-width: 820px) {
+            .dash-mobile-bar {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin-bottom: 16px;
+                padding-bottom: 12px;
+                border-bottom: 1px solid var(--border-color);
+            }
+
+            .dash-mobile-bar button {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                background: #111827;
+                color: #fff;
+                border: none;
+                border-radius: 8px;
+                padding: 8px 14px;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                flex-shrink: 0;
+            }
+
+            .dash-mobile-bar button svg { transition: transform 0.2s; }
+            .dash-mobile-bar button.is-open svg { transform: rotate(180deg); }
+
+            .dash-mobile-current {
+                font-size: 13px;
+                font-weight: 600;
+                color: var(--text-secondary);
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            /* Phone is a consumption surface: authoring controls (edit course,
+               add module, add content) are hidden. Course owners manage on a
+               larger screen. */
+            .dash-manage { display: none !important; }
+
+            .has-nav-panel .panel-list { display: none !important; }
+
+            .has-nav-panel.nav-open .panel-list {
+                display: flex !important;
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                z-index: 45;
+                max-height: 82vh;
+                border-bottom: 2px solid var(--primary-blue);
+                box-shadow: 0 14px 34px rgba(16, 24, 40, 0.2);
+            }
+
+            .has-nav-panel.nav-open .dash-backdrop {
+                display: block;
+                position: fixed;
+                inset: 0;
+                z-index: 44;
+                background: rgba(17, 24, 39, 0.35);
+            }
+        }
+    </style>
+
+    <div class="dash-backdrop" @click="navOpen = false"></div>
+
     <div class="panel-list p-2">
 
 
@@ -481,7 +556,7 @@ new #[Layout('layouts.app')] class extends Component
             </div>
 
             @if($this->currentCourse && $this->canManageCourse)
-                <button type="button" wire:click="editCourse" title="Edit Course" style="background: #F3F4F6; border: 1px solid #E5E7EB; border-radius: 6px; padding: 8px; cursor: pointer; color: #4B5563; display: flex; align-items: center; justify-content: center;">
+                <button type="button" wire:click="editCourse" title="Edit Course" class="dash-manage" style="background: #F3F4F6; border: 1px solid #E5E7EB; border-radius: 6px; padding: 8px; cursor: pointer; color: #4B5563; display: flex; align-items: center; justify-content: center;">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                     </svg>
@@ -548,7 +623,7 @@ new #[Layout('layouts.app')] class extends Component
 
 
             @if($selectedCourseId && $this->canManageCourse)
-            <div class="mt-4 p-2 w-full flex justify-center no-print">
+            <div class="mt-4 p-2 w-full flex justify-center no-print dash-manage">
                 <button wire:click="$set('showCreateModuleModal', true)" class="w-full bg-blue-100 text-blue-600 border border-blue-200 rounded p-2 hover:bg-blue-200 transition-colors cursor-pointer" style="font-weight: 500; border: 1px dashed #3b82f6; background: transparent; color: #3b82f6; width: 100%; border-radius: 6px; padding: 8px;">+ Add Module</button>
             </div>
             @endif
@@ -557,6 +632,15 @@ new #[Layout('layouts.app')] class extends Component
     </div>
 
     <div class="panel-content" style="padding:2rem;width:100%">
+        <div class="dash-mobile-bar">
+            <button type="button" @click="navOpen = !navOpen" :class="{ 'is-open': navOpen }">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+                Modules
+            </button>
+            <span class="dash-mobile-current">{{ $this->currentModule?->title ?? ($this->currentCourse ? 'Pick a module' : 'No course') }}</span>
+        </div>
         @if($this->currentCourse)
             <div class="content-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
                 <div>
@@ -564,7 +648,7 @@ new #[Layout('layouts.app')] class extends Component
                     <h1 class="content-title">{{ $this->currentModule ? $this->currentModule->title : 'No topic selected' }}</h1>
                 </div>
                 @if($this->currentModule && $this->canManageCourse)
-                    <div x-data="{ open: false }" class="no-print" style="position: relative; display: inline-block;">
+                    <div x-data="{ open: false }" class="no-print dash-manage" style="position: relative; display: inline-block;">
                         <button @click="open = !open" style="background-color: #4F46E5; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; transition: background-color 0.2s;">
                             + Add Content
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" :style="open ? 'transform: rotate(180deg); transition: transform 0.2s;' : 'transition: transform 0.2s;'">

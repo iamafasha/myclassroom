@@ -324,7 +324,35 @@ new #[Layout('layouts.app')] class extends Component
 }
 ?>
 
-<div class="panel-list" style="width: 100%; padding: 40px; overflow-y: auto;">
+<div class="panel-list content-read" style="width: 100%; padding: 40px; overflow-y: auto;">
+    <style>
+        /* Reading view: tighten the owner controls and the completion footer so
+           they stay usable on a phone instead of eating half the screen. */
+        @media (max-width: 820px) {
+            .content-read { padding: 18px 16px 40px !important; }
+
+            /* Owner management chrome is desktop-only on the reading view: the
+               header action buttons and the per-block bar (type label plus
+               reorder and edit controls) are hidden on a phone so a reader just
+               sees the content. Structural edits stay on desktop. */
+            .content-read .cs-header-actions,
+            .content-read .cs-item-bar { display: none !important; }
+
+            .content-read .cs-footer {
+                flex-direction: column;
+                align-items: stretch !important;
+                justify-content: flex-start !important;
+            }
+            .content-read .cs-footer > *,
+            .content-read .cs-footer form,
+            .content-read .cs-footer form button,
+            .content-read .cs-footer > a {
+                width: 100%;
+            }
+            .content-read .cs-footer form button,
+            .content-read .cs-footer > a { justify-content: center; }
+        }
+    </style>
     <div class="content-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
         <div>
             @php
@@ -346,7 +374,7 @@ new #[Layout('layouts.app')] class extends Component
         </div>
 
         @if($this->canManage)
-        <div style="display: flex; align-items: center; gap: 0.5rem;">
+        <div class="cs-header-actions" style="display: flex; align-items: center; gap: 0.5rem;">
         <button wire:click="deleteModuleContent"
                 wire:confirm="Delete &quot;{{ $moduleContent->label ?? 'this content' }}&quot; and everything inside it? This cannot be undone."
                 style="background-color: #FEE2E2; color: #B91C1C; border: 1px solid #FECACA; padding: 0.5rem 1rem; border-radius: 0.375rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 0.5rem;"
@@ -424,7 +452,7 @@ new #[Layout('layouts.app')] class extends Component
 
             <div style="{{ !$loop->first ? 'margin-top: 30px; padding-top: 30px; border-top: 1px solid #E5E7EB;' : '' }}">
 
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div class="cs-item-bar" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                 <span style="font-size: 0.75rem; font-weight: 700; color: #6B7280; text-transform: uppercase; letter-spacing: 0.05em;">{{ $contentTypeLabels[$type] ?? 'Content' }}</span>
                 @if($this->canManage)
                 <div style="display: flex; align-items: center; gap: 6px;">
@@ -1219,7 +1247,7 @@ new #[Layout('layouts.app')] class extends Component
                           x-on:livewire-upload-cancel="uploading = false"
                           x-on:livewire-upload-error="uploading = false"
                           x-on:livewire-upload-progress="progress = $event.detail.progress">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 16px; margin-bottom: 16px;">
                             <div>
                                 <label style="display: block; font-size: 0.875rem; font-weight: 600; color: #78350F; margin-bottom: 6px;">Provide Answer Link</label>
                                 <input type="url" wire:model="submissionLinks.{{ $pivotId }}" style="width: 100%; padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.875rem; outline: none;" placeholder="https://github.com/... or Google Doc URL">
@@ -1262,7 +1290,7 @@ new #[Layout('layouts.app')] class extends Component
             </div>
         @endforelse
 
-        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #E5E7EB; display: flex; justify-content: flex-end; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <div class="cs-footer" style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #E5E7EB; display: flex; justify-content: flex-end; align-items: center; gap: 12px; flex-wrap: wrap;">
             <form action="{{ route('content.toggle-complete', $moduleContent->id) }}" method="POST">
                 @csrf
                 @if($moduleContent->isCompletedFor(auth()->user()))

@@ -208,7 +208,7 @@ new #[Layout('layouts.app')] class extends Component {
         </div>
     @endif
 
-    <div style="display: flex; gap: 30px; margin-top: 20px;"
+    <div class="responsive-shell" style="display: flex; gap: 30px; margin-top: 20px;"
          x-data="{
              queue: [],
              nextId: 1,

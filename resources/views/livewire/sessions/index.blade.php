@@ -400,14 +400,32 @@ new #[Layout('layouts.app')] class extends Component {
 }; ?>
 
 <div style="display: flex; flex-direction: column; width: 100%; height: 100%; overflow-y: auto; background-color: #F9FAFB;">
+    <style>
+        .sessions-header { padding: 28px 40px; display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+        .sessions-header-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+        .sessions-body { padding: 30px 40px; }
+        @media (max-width: 820px) {
+            .sessions-header {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 16px;
+                padding: 20px 16px;
+            }
+            .sessions-header p { font-size: 13px; }
+            .sessions-header-actions { gap: 10px; }
+            .sessions-header-actions button { flex: 1; justify-content: center; padding: 11px 12px !important; white-space: nowrap; }
+            .sessions-body { padding: 20px 16px; }
+            .session-modal { padding: 24px 20px !important; border-radius: 14px !important; }
+        }
+    </style>
 
     <!-- Header -->
-    <div style="background: white; border-bottom: 1px solid #E5E7EB; padding: 28px 40px; display: flex; justify-content: space-between; align-items: center;">
+    <div class="sessions-header" style="background: white; border-bottom: 1px solid #E5E7EB;">
         <div>
             <h1 style="margin: 0 0 4px; font-size: 26px; font-weight: 800; color: #111827;">Sessions</h1>
             <p style="margin: 0; font-size: 14px; color: #6B7280;">One-to-one time with the mentor who owns a course.</p>
         </div>
-        <div style="display: flex; align-items: center; gap: 10px;">
+        <div class="sessions-header-actions">
             @if($this->mentoredCourses->isNotEmpty())
                 <button wire:click="openInviteForm"
                         style="background-color: white; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 9px; padding: 11px 20px; font-size: 14px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 7px; transition: background-color 0.2s;"
@@ -432,7 +450,7 @@ new #[Layout('layouts.app')] class extends Component {
     <!-- Request form modal (student) -->
     @if($showRequestForm)
     <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 20px;" wire:click.self="$set('showRequestForm', false)">
-        <div style="background: white; border-radius: 16px; padding: 36px; width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.2);" wire:click.stop>
+        <div class="session-modal" style="background: white; border-radius: 16px; padding: 36px; width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.2);" wire:click.stop>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
                 <h2 style="margin: 0; font-size: 20px; font-weight: 700; color: #111827;">Request a Session</h2>
                 <button wire:click="$set('showRequestForm', false)" style="background: none; border: none; cursor: pointer; color: #6B7280; padding: 4px;">
@@ -479,14 +497,14 @@ new #[Layout('layouts.app')] class extends Component {
                         @error('message') <span style="color: #EF4444; font-size: 12px; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
                     </div>
 
-                    <div style="display: flex; gap: 14px;">
-                        <div style="flex: 2;">
+                    <div style="display: flex; gap: 14px; flex-wrap: wrap;">
+                        <div style="flex: 2; min-width: 180px;">
                             <label style="display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px;">Preferred time <span style="font-weight: 400; color: #9CA3AF;">(optional)</span></label>
                             <input wire:model="preferredAt" type="datetime-local"
                                    style="width: 100%; padding: 10px 14px; border: 1px solid #D1D5DB; border-radius: 8px; font-size: 14px; outline: none; box-sizing: border-box;">
                             @error('preferredAt') <span style="color: #EF4444; font-size: 12px; display: block; margin-top: 4px;">{{ $message }}</span> @enderror
                         </div>
-                        <div style="flex: 1;">
+                        <div style="flex: 1; min-width: 120px;">
                             <label style="display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px;">Length</label>
                             <select wire:model="durationMinutes" class="select-styled" style="background: white;">
                                 <option value="15">15 min</option>
@@ -522,7 +540,7 @@ new #[Layout('layouts.app')] class extends Component {
     <!-- Start-a-session modal (mentor) -->
     @if($showInviteForm)
     <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 20px;" wire:click.self="$set('showInviteForm', false)">
-        <div style="background: white; border-radius: 16px; padding: 36px; width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.2);" wire:click.stop>
+        <div class="session-modal" style="background: white; border-radius: 16px; padding: 36px; width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.2);" wire:click.stop>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <h2 style="margin: 0; font-size: 20px; font-weight: 700; color: #111827;">Start a Session</h2>
                 <button wire:click="$set('showInviteForm', false)" style="background: none; border: none; cursor: pointer; color: #6B7280; padding: 4px;">
@@ -650,7 +668,7 @@ new #[Layout('layouts.app')] class extends Component {
     @if($respondingId)
     @php($responding = $this->incoming->firstWhere('id', $respondingId))
     <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 20px;" wire:click.self="$set('respondingId', null)">
-        <div style="background: white; border-radius: 16px; padding: 36px; width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.2);" wire:click.stop>
+        <div class="session-modal" style="background: white; border-radius: 16px; padding: 36px; width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.2);" wire:click.stop>
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
                 <h2 style="margin: 0; font-size: 20px; font-weight: 700; color: #111827;">Offer Times</h2>
                 <button wire:click="$set('respondingId', null)" style="background: none; border: none; cursor: pointer; color: #6B7280; padding: 4px;">
@@ -731,7 +749,7 @@ new #[Layout('layouts.app')] class extends Component {
     </div>
     @endif
 
-    <div style="padding: 30px 40px;">
+    <div class="sessions-body">
 
         @if (session('success'))
             <div style="background-color: #ECFDF5; color: #065F46; padding: 12px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; margin-bottom: 20px; border: 1px solid #A7F3D0;">

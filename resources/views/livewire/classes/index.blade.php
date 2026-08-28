@@ -162,7 +162,7 @@ new #[Layout('layouts.app')] class extends Component {
     }
 }; ?>
 
-<div style="display: flex; width: 100%; height: 100%; overflow: hidden;">
+<div class="responsive-shell" style="display: flex; width: 100%; height: 100%; overflow: hidden;">
     <!-- Form Panel -->
     <div class="panel-list" style="width: 350px; padding: 40px 20px; overflow-y: auto; background-color: #F9FAFB; border-right: 1px solid #E5E7EB; flex-shrink: 0;">
         <div class="content-header" style="margin-bottom: 30px;">
