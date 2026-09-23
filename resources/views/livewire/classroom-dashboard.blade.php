@@ -1,13 +1,19 @@
 <?php
 
-use Livewire\Attributes\Computed;
+use App\Models\Classroom;
 use App\Models\Course;
+use App\Models\CourseEnrollment;
 use App\Models\Module;
+use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\Url;
 use Livewire\Volt\Component;
 
 new #[Layout('layouts.app')] class extends Component
 {
+    #[Url(as: 'class')]
+    public ?int $classroomId = null;
+
     public $selectedCourseId = null;
     public $selectedModuleId = null;
     
@@ -33,17 +39,41 @@ new #[Layout('layouts.app')] class extends Component
         $this->selectedCourseId = $courseId;
         $this->selectedModuleId = $moduleId;
 
+        // A class from someone else's account, or one left behind, must not filter anything.
+        if ($this->classroomId && ! $this->classrooms->contains('id', $this->classroomId)) {
+            $this->classroomId = null;
+        }
+
         // Never land on a course outside the user's classes.
-        if ($this->selectedCourseId && !Course::visibleTo(auth()->user())->whereKey($this->selectedCourseId)->exists()) {
+        $course = $this->selectedCourseId
+            ? Course::visibleTo(auth()->user())->with('classrooms')->find($this->selectedCourseId)
+            : null;
+
+        if ($this->selectedCourseId && ! $course) {
             $this->selectedCourseId = null;
             $this->selectedModuleId = null;
         }
 
-        if (!$this->selectedCourseId) {
-            $firstCourse = Course::visibleTo(auth()->user())->orderBy('title')->first();
+        // A course opened directly takes the class it is taught in, so its siblings fill the list.
+        if ($course) {
+            $courseClassIds = $course->classrooms->pluck('id')->intersect($this->classrooms->pluck('id'));
+
+            if (! $courseClassIds->contains($this->classroomId)) {
+                $this->classroomId = $courseClassIds->first();
+            }
+        }
+
+        // Someone in just one class never has to choose it.
+        if (! $this->classroomId && ! $course && $this->classrooms->count() === 1) {
+            $this->classroomId = $this->classrooms->first()->id;
+        }
+
+        if (! $this->selectedCourseId && ! $this->needsClassPick) {
+            $firstCourse = $this->courses->first();
+
             if ($firstCourse) {
                 $this->selectedCourseId = $firstCourse->id;
-                
+
                 // If a course was automatically selected, try to select its first module
                 if (!$this->selectedModuleId) {
                     $firstModule = Module::where('course_id', $this->selectedCourseId)->orderBy('sort_order', 'asc')->orderBy('id', 'asc')->first();
@@ -53,6 +83,46 @@ new #[Layout('layouts.app')] class extends Component
                 }
             }
         }
+    }
+
+    /** Classes the user teaches or attends, the ones worth switching between. */
+    #[Computed]
+    public function classrooms()
+    {
+        return Classroom::query()
+            ->where(fn ($q) => $q->where('admin_id', auth()->id())
+                ->orWhereHas('users', fn ($u) => $u->where('users.id', auth()->id())))
+            ->withCount('courses')
+            ->orderBy('title')
+            ->get();
+    }
+
+    #[Computed]
+    public function currentClassroom()
+    {
+        return $this->classroomId ? $this->classrooms->firstWhere('id', $this->classroomId) : null;
+    }
+
+    /** Someone in several classes picks one before any course is shown. */
+    #[Computed]
+    public function needsClassPick(): bool
+    {
+        return ! $this->classroomId && ! $this->selectedCourseId && $this->classrooms->count() > 1;
+    }
+
+    /** Courses the user can see that sit in none of their classes, e.g. ones they created on their own. */
+    private function ownCoursesQuery()
+    {
+        $classroomIds = $this->classrooms->pluck('id');
+
+        return Course::visibleTo(auth()->user())
+            ->whereDoesntHave('classrooms', fn ($q) => $q->whereIn('classrooms.id', $classroomIds));
+    }
+
+    #[Computed]
+    public function firstOwnCourse()
+    {
+        return $this->ownCoursesQuery()->orderBy('title')->first();
     }
 
     public function selectModule($moduleId)
@@ -392,10 +462,40 @@ new #[Layout('layouts.app')] class extends Component
         }
     }
 
+    /** Only the picked class's courses; with no class picked, the ones outside every class. */
     #[Computed]
     public function courses()
     {
-        return Course::visibleTo(auth()->user())->with('classrooms')->orderBy('title')->get();
+        if ($this->needsClassPick) {
+            return collect();
+        }
+
+        if (! $this->classroomId) {
+            return $this->ownCoursesQuery()->with('classrooms')->orderBy('title')->get();
+        }
+
+        $courses = Course::visibleTo(auth()->user())
+            ->whereHas('classrooms', fn ($q) => $q->whereKey($this->classroomId))
+            ->with('classrooms')
+            ->orderedForClassroom($this->classroomId)
+            ->get();
+
+        // The course a learner was most recently promoted to leads the list, so it opens by default.
+        $latestPromotedId = CourseEnrollment::query()
+            ->where('classroom_id', $this->classroomId)
+            ->where('user_id', auth()->id())
+            ->whereNotNull('promoted_at')
+            ->whereNull('removed_at')
+            ->whereIn('course_id', $courses->pluck('id'))
+            ->latest('promoted_at')
+            ->latest('id')
+            ->value('course_id');
+
+        if (! $latestPromotedId) {
+            return $courses;
+        }
+
+        return $courses->sortBy(fn (Course $course) => (int) $course->id === (int) $latestPromotedId ? 0 : 1)->values();
     }
 
     #[Computed]
@@ -446,6 +546,36 @@ new #[Layout('layouts.app')] class extends Component
            so the reading pane gets the full screen until the learner asks for the
            module list. */
         .dash-mobile-bar { display: none; }
+
+        /* Class switcher above the course selector */
+        .class-switcher-btn {
+            width: 100%;
+            display: flex; align-items: center; gap: 8px;
+            background: #ffffff;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-size: 12.5px; font-weight: 600; color: #374151;
+            cursor: pointer; text-align: left;
+        }
+        .class-switcher-btn:hover { border-color: #BFDBFE; }
+        .class-switcher-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        /* Class picker shown to people in several classes before any course */
+        .class-pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin-top: 8px; }
+        .class-pick-card {
+            display: block;
+            text-decoration: none;
+            background: #ffffff;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px 18px;
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+        .class-pick-card:hover { border-color: #93C5FD; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.08); }
+        .class-pick-role { font-size: 10.5px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #2563EB; }
+        .class-pick-title { font-size: 16px; font-weight: 700; color: #111827; margin-top: 4px; }
+        .class-pick-meta { font-size: 12.5px; color: #6B7280; margin-top: 2px; }
         .dash-backdrop { display: none; }
 
         @media (max-width: 820px) {
@@ -518,8 +648,49 @@ new #[Layout('layouts.app')] class extends Component
 
     <div class="panel-list p-2">
 
+        {{-- Class switcher: only worth showing when there is more than one place to go --}}
+        @if($this->classrooms->count() > 1 || ($this->classrooms->isNotEmpty() && $this->firstOwnCourse))
+            <div class="class-switcher" x-data="{ open: false }" @click.outside="open = false" style="position: relative; margin-bottom: 10px;">
+                <button type="button" @click="open = !open" class="class-switcher-btn">
+                    <svg width="15" height="15" fill="none" stroke="#6B7280" stroke-width="2" viewBox="0 0 24 24" style="flex-shrink: 0;">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 14l9-5-9-5-9 5 9 5zm0 0l6.16-3.422A12.083 12.083 0 0112 20.055a12.083 12.083 0 01-6.16-9.477L12 14z" />
+                    </svg>
+                    <span class="class-switcher-value">
+                        @if($this->currentClassroom)
+                            {{ $this->currentClassroom->title }}
+                        @elseif($this->needsClassPick)
+                            Choose a class
+                        @else
+                            Your own courses
+                        @endif
+                    </span>
+                    <svg width="14" height="14" fill="none" stroke="#6B7280" stroke-width="2" viewBox="0 0 24 24" style="flex-shrink: 0; transition: transform 0.2s;" :style="open ? 'transform: rotate(180deg);' : ''">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                </button>
 
+                <div class="custom-select-dropdown" x-show="open" x-cloak x-transition.opacity.duration.100ms style="display: none;">
+                    @foreach($this->classrooms as $classroom)
+                        <a href="{{ route('dashboard', ['class' => $classroom->id]) }}" wire:navigate style="display: block; text-decoration: none;"
+                           class="custom-select-option {{ $classroomId === $classroom->id ? 'selected' : '' }}">
+                            {{ $classroom->title }}
+                            <span style="display: block; margin-top: 2px; font-size: 11px; font-weight: 500; color: #6B7280;">
+                                {{ $classroom->isAdministeredBy(auth()->user()) ? 'You teach' : 'Attending' }} · {{ $classroom->courses_count }} {{ \Illuminate\Support\Str::plural('course', $classroom->courses_count) }}
+                            </span>
+                        </a>
+                    @endforeach
+                    @if($this->firstOwnCourse)
+                        <a href="{{ route('course.show', $this->firstOwnCourse->id) }}" wire:navigate style="display: block; text-decoration: none;"
+                           class="custom-select-option {{ ! $classroomId && ! $this->needsClassPick ? 'selected' : '' }}">
+                            Your own courses
+                            <span style="display: block; margin-top: 2px; font-size: 11px; font-weight: 500; color: #6B7280;">Not in any class</span>
+                        </a>
+                    @endif
+                </div>
+            </div>
+        @endif
 
+        @unless($this->needsClassPick)
         <div class="course-selector group" x-data="{ open: false }" @click.outside="open = false" style="position: relative; display: flex; align-items: center; gap: 8px;">
             
             <div @click="open = !open" class="select-styled" style="flex: 1; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 8px; background-image: none; user-select: none;">
@@ -540,7 +711,7 @@ new #[Layout('layouts.app')] class extends Component
           
             <div class="custom-select-dropdown" x-show="open" x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100" x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95" style="display: none;">
                 @foreach($this->courses as $course)
-                    <a href="{{ route('course.show', $course->id) }}" wire:navigate style="display: block; text-decoration: none;"
+                    <a href="{{ route('course.show', ['courseId' => $course->id, 'class' => $classroomId]) }}" wire:navigate style="display: block; text-decoration: none;"
                          class="custom-select-option {{ $selectedCourseId == $course->id ? 'selected' : '' }}">
                         {{ $course->title }}
                         @if($course->classLabel())
@@ -564,10 +735,11 @@ new #[Layout('layouts.app')] class extends Component
             @endif
 
         </div>
+        @endunless
 
         <div class="module-list" style="padding-bottom: 50px;">
             @foreach($this->modules as $module)
-                <a  href="{{ route('course.module.show', ['courseId' => $this->selectedCourseId, 'moduleId' => $module->id]) }}" wire:navigate 
+                <a  href="{{ route('course.module.show', ['courseId' => $this->selectedCourseId, 'moduleId' => $module->id, 'class' => $classroomId]) }}" wire:navigate 
                      x-data="{ isOver: false }"
                      @if($this->canManageCourse)
                      @dragover.prevent="isOver = true"
@@ -673,6 +845,30 @@ new #[Layout('layouts.app')] class extends Component
                             <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                         </svg>
                         Request a session
+                    </a>
+                @endif
+            </div>
+        @elseif($this->needsClassPick)
+            <div class="content-header">
+                <div>
+                    <div class="content-breadcrumb">You are in {{ $this->classrooms->count() }} classes</div>
+                    <h1 class="content-title">Which class do you want to see?</h1>
+                </div>
+            </div>
+
+            <div class="class-pick-grid">
+                @foreach($this->classrooms as $classroom)
+                    <a href="{{ route('dashboard', ['class' => $classroom->id]) }}" wire:navigate class="class-pick-card">
+                        <div class="class-pick-role">{{ $classroom->isAdministeredBy(auth()->user()) ? 'You teach' : 'Attending' }}</div>
+                        <div class="class-pick-title">{{ $classroom->title }}</div>
+                        <div class="class-pick-meta">{{ $classroom->courses_count }} {{ \Illuminate\Support\Str::plural('course', $classroom->courses_count) }}</div>
+                    </a>
+                @endforeach
+                @if($this->firstOwnCourse)
+                    <a href="{{ route('course.show', $this->firstOwnCourse->id) }}" wire:navigate class="class-pick-card">
+                        <div class="class-pick-role">Not in any class</div>
+                        <div class="class-pick-title">Your own courses</div>
+                        <div class="class-pick-meta">Courses you created on your own</div>
                     </a>
                 @endif
             </div>

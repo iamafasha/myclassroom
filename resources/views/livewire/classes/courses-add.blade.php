@@ -26,6 +26,7 @@ new #[Layout('layouts.app')] class extends Component {
         return Course::managedBy(auth()->user())
             ->whereNotIn('id', $existingCourseIds)
             ->when($this->search, fn($q) => $q->where('title', 'like', '%' . $this->search . '%'))
+            ->withCount('modules')
             ->orderBy('title')
             ->get();
     }
@@ -33,20 +34,41 @@ new #[Layout('layouts.app')] class extends Component {
     #[Computed]
     public function addedCourses()
     {
-        return $this->classroom->courses()->orderBy('title')->get();
+        return $this->classroom->courses()->withCount('modules')->get();
     }
 
     public function add($courseId)
     {
         abort_unless(Course::managedBy(auth()->user())->whereKey($courseId)->exists(), 403, 'You do not own this course.');
 
-        $this->classroom->courses()->attach($courseId);
+        // Land at the top of the syllabus: newly added course goes to the top.
+        $this->classroom->addCourse($courseId);
+        unset($this->courses, $this->addedCourses);
         session()->flash('success', 'Course added to class successfully.');
+    }
+
+    public function moveCourseUp($courseId): void
+    {
+        abort_unless($this->classroom->isAdministeredBy(auth()->user()), 403, 'You do not manage this class.');
+
+        $this->classroom->moveCourse($courseId, -1);
+        unset($this->addedCourses);
+    }
+
+    public function moveCourseDown($courseId): void
+    {
+        abort_unless($this->classroom->isAdministeredBy(auth()->user()), 403, 'You do not manage this class.');
+
+        $this->classroom->moveCourse($courseId, 1);
+        unset($this->addedCourses);
     }
 
     public function remove($courseId)
     {
         $this->classroom->courses()->detach($courseId);
+        $this->classroom->courseEnrollments()->where('course_id', $courseId)->delete();
+        $this->classroom->resequenceCourses();
+        unset($this->courses, $this->addedCourses);
         session()->flash('success', 'Course removed from class.');
     }
 }; ?>
@@ -119,7 +141,7 @@ new #[Layout('layouts.app')] class extends Component {
                             </div>
                             <div>
                                 <p style="margin: 0; font-weight: 600; font-size: 15px; color: #111827;">{{ $course->title }}</p>
-                                <p style="margin: 4px 0 0; font-size: 12px; color: #6B7280;">{{ $course->modules()->count() }} modules</p>
+                                <p style="margin: 4px 0 0; font-size: 12px; color: #6B7280;">{{ $course->modules_count }} {{ str('module')->plural($course->modules_count) }}</p>
                             </div>
                         </div>
                         <button wire:click="add({{ $course->id }})"
@@ -147,16 +169,29 @@ new #[Layout('layouts.app')] class extends Component {
 
         <!-- Right: Already added courses -->
         <div style="position: sticky; top: 20px;">
-            <h2 style="margin: 0 0 16px; font-size: 16px; font-weight: 700; color: #111827;">
+            <h2 style="margin: 0 0 8px; font-size: 16px; font-weight: 700; color: #111827;">
                 Added to Class
                 <span style="font-size: 13px; font-weight: 500; color: #6B7280;">({{ $this->addedCourses->count() }})</span>
             </h2>
+            @if($this->addedCourses->count() > 1)
+                <p style="margin: 0 0 12px; font-size: 12px; color: #6B7280;">
+                    Use the arrows to set the syllabus order.
+                </p>
+            @endif
             <div style="background: white; border: 1px solid #E5E7EB; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                 @forelse($this->addedCourses as $course)
-                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; {{ !$loop->last ? 'border-bottom: 1px solid #F3F4F6;' : '' }}">
-                        <div>
-                            <p style="margin: 0; font-size: 13px; font-weight: 600; color: #1F2937;">{{ $course->title }}</p>
-                            <p style="margin: 3px 0 0; font-size: 11px; color: #6B7280;">{{ $course->modules()->count() }} modules</p>
+                    <div wire:key="added-course-{{ $course->id }}" style="display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 14px 16px; {{ !$loop->last ? 'border-bottom: 1px solid #F3F4F6;' : '' }}">
+                        <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+                            <div style="display: flex; flex-direction: column; gap: 2px;">
+                                <button type="button" wire:click="moveCourseUp({{ $course->id }})" @disabled($loop->first) title="Move up"
+                                        style="width: 20px; height: 16px; display: inline-flex; align-items: center; justify-content: center; background: white; border: 1px solid #D1D5DB; border-radius: 3px; color: #4B5563; font-size: 9px; line-height: 1; cursor: {{ $loop->first ? 'not-allowed' : 'pointer' }}; opacity: {{ $loop->first ? '0.4' : '1' }};">&uarr;</button>
+                                <button type="button" wire:click="moveCourseDown({{ $course->id }})" @disabled($loop->last) title="Move down"
+                                        style="width: 20px; height: 16px; display: inline-flex; align-items: center; justify-content: center; background: white; border: 1px solid #D1D5DB; border-radius: 3px; color: #4B5563; font-size: 9px; line-height: 1; cursor: {{ $loop->last ? 'not-allowed' : 'pointer' }}; opacity: {{ $loop->last ? '0.4' : '1' }};">&darr;</button>
+                            </div>
+                            <div style="min-width: 0;">
+                                <p style="margin: 0; font-size: 13px; font-weight: 600; color: #1F2937;">{{ $course->title }}</p>
+                                <p style="margin: 3px 0 0; font-size: 11px; color: #6B7280;">{{ $course->modules_count }} {{ str('module')->plural($course->modules_count) }}</p>
+                            </div>
                         </div>
                         <button wire:click="remove({{ $course->id }})" wire:confirm="Remove this course from the class?"
                                 style="background: none; border: none; cursor: pointer; color: #EF4444; padding: 4px; opacity: 0.6; transition: opacity 0.2s;"

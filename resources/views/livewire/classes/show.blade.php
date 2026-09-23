@@ -19,6 +19,9 @@ new #[Layout('layouts.app')] class extends Component {
     /** Inline edit of the class title. */
     public bool $editingTitle = false;
 
+    /** The course whose per-person roster is expanded, if any. */
+    public ?int $rosterCourseId = null;
+
     #[Validate('required|string|max:255')]
     public string $title = '';
 
@@ -148,7 +151,133 @@ new #[Layout('layouts.app')] class extends Component {
     #[Computed]
     public function classCourses()
     {
-        return $this->classroom->courses()->orderBy('title')->get();
+        return $this->classroom->courses()->withCount('modules')->get();
+    }
+
+    /**
+     * Per-person standing on every course in this class, keyed "courseId-userId" so
+     * the roster below renders without a query per row.
+     */
+    #[Computed]
+    public function enrollments()
+    {
+        return $this->classroom->courseEnrollments()
+            ->with('completedBy')
+            ->get()
+            ->keyBy(fn ($enrollment) => $enrollment->course_id . '-' . $enrollment->user_id);
+    }
+
+    public function moveCourseUp($courseId): void
+    {
+        $this->authorizeManage();
+
+        $this->classroom->moveCourse($courseId, -1);
+        unset($this->classCourses);
+    }
+
+    public function moveCourseDown($courseId): void
+    {
+        $this->authorizeManage();
+
+        $this->classroom->moveCourse($courseId, 1);
+        unset($this->classCourses);
+    }
+
+    /** Show the per-course roster for one course at a time. */
+    public function toggleRoster($courseId): void
+    {
+        $this->rosterCourseId = (int) $this->rosterCourseId === (int) $courseId ? null : (int) $courseId;
+    }
+
+    /**
+     * Excuse someone from a single course of this class, or put them back. The course
+     * disappears from their dashboard; the rest of the class is untouched.
+     */
+    public function toggleCourseAccess($courseId, $userId): void
+    {
+        $this->authorizeManage();
+        $this->authorizeCoursePair($courseId, $userId);
+
+        $enrollment = $this->classroom->enrollmentFor($courseId, $userId);
+        $enrollment->removed_at = $enrollment->isRemoved() ? null : now();
+        $enrollment->save();
+
+        unset($this->enrollments);
+
+        session()->flash('success_course', $enrollment->isRemoved()
+            ? 'Removed from this course. The rest of the class is unchanged.'
+            : 'Access to this course restored.');
+    }
+
+    /** Sign a course off as finished for one person, or undo that. */
+    public function toggleCourseCompleted($courseId, $userId): void
+    {
+        $this->authorizeManage();
+        $this->authorizeCoursePair($courseId, $userId);
+
+        $enrollment = $this->classroom->enrollmentFor($courseId, $userId);
+        $completing = ! $enrollment->isCompleted();
+
+        $enrollment->completed_at = $completing ? now() : null;
+        $enrollment->completed_by = $completing ? auth()->id() : null;
+        $enrollment->save();
+
+        unset($this->enrollments);
+
+        session()->flash('success_course', $completing
+            ? 'Course marked as completed.'
+            : 'Completion cleared.');
+    }
+
+    /** Promote a student to a subsequent course, whether or not they finished the previous one. */
+    public function promoteAttendee($courseId, $userId): void
+    {
+        $this->authorizeManage();
+        $this->authorizeCoursePair($courseId, $userId);
+
+        if (! $this->classroom->canPromoteStudent($courseId, $userId)) {
+            session()->flash('error_course', 'Cannot promote: student is already promoted or this course needs no promotion.');
+            return;
+        }
+
+        $this->classroom->promoteStudent($courseId, $userId, auth()->user());
+        unset($this->enrollments);
+
+        session()->flash('success_course', 'Student promoted to course successfully.');
+    }
+
+    public function promoteStudent($courseId, $userId): void
+    {
+        $this->promoteAttendee($courseId, $userId);
+    }
+
+    /** Demote / revoke a student's promotion to a course. */
+    public function demoteAttendee($courseId, $userId): void
+    {
+        $this->authorizeManage();
+        $this->authorizeCoursePair($courseId, $userId);
+
+        $this->classroom->demoteStudent($courseId, $userId);
+        unset($this->enrollments);
+
+        session()->flash('success_course', 'Student promotion revoked.');
+    }
+
+    public function demoteStudent($courseId, $userId): void
+    {
+        $this->demoteAttendee($courseId, $userId);
+    }
+
+    private function authorizeManage(): void
+    {
+        abort_unless($this->classroom->isAdministeredBy(auth()->user()), 403, 'You do not manage this class.');
+    }
+
+    /** Guards against a forged id naming a course or person outside this class. */
+    private function authorizeCoursePair($courseId, $userId): void
+    {
+        abort_unless($this->classroom->courses()->whereKey($courseId)->exists(), 404, 'That course is not in this class.');
+        abort_unless($this->classroom->hasMember($userId), 404, 'That person is not in this class.');
     }
 
     public function addAttendee()
@@ -161,13 +290,32 @@ new #[Layout('layouts.app')] class extends Component {
 
     public function removeAttendee($userId)
     {
+        $this->authorizeManage();
+
         $this->classroom->users()->detach($userId);
+        // Their per-course exclusions and sign-offs go with them, so re-adding
+        // later starts clean rather than restoring stale decisions.
+        $this->classroom->courseEnrollments()->where('user_id', $userId)->delete();
+
+        unset($this->attendees, $this->enrollments);
+
         session()->flash('success_attendee', 'Attendee removed successfully.');
     }
 
     public function removeCourse($courseId)
     {
+        $this->authorizeManage();
+
         $this->classroom->courses()->detach($courseId);
+        $this->classroom->courseEnrollments()->where('course_id', $courseId)->delete();
+        $this->classroom->resequenceCourses();
+
+        if ((int) $this->rosterCourseId === (int) $courseId) {
+            $this->rosterCourseId = null;
+        }
+
+        unset($this->classCourses, $this->enrollments);
+
         session()->flash('success_course', 'Course removed successfully.');
     }
 
@@ -382,30 +530,174 @@ new #[Layout('layouts.app')] class extends Component {
                     {{ session('success_course') }}
                 </div>
             @endif
+
+            @if (session('error_course'))
+                <div style="background-color: #FEF2F2; color: #991B1B; padding: 12px 15px; border-radius: 8px; font-size: 13px; font-weight: 500; margin-bottom: 15px; border: 1px solid #FECACA;">
+                    {{ session('error_course') }}
+                </div>
+            @endif
             
             <div style="background: white; border: 1px solid #E5E7EB; border-radius: 12px; padding: 25px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
-                <div style="display: flex; flex-direction: column; gap: 10px; max-height: 400px; overflow-y: auto;">
+                @if($this->classCourses->count() > 1)
+                    <p style="margin: 0 0 12px; font-size: 12px; color: #6B7280;">
+                        Courses appear to attendees in this order. Use the arrows to rearrange the syllabus.
+                    </p>
+                @endif
+
+                <div style="display: flex; flex-direction: column; gap: 10px; max-height: 520px; overflow-y: auto;">
                     @forelse($this->classCourses as $course)
-                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px; background: #F9FAFB; border: 1px solid #F3F4F6; border-radius: 8px;">
-                            <div style="display: flex; align-items: center; gap: 12px;">
-                                <div style="width: 36px; height: 36px; border-radius: 8px; background-color: #D1FAE5; display: flex; align-items: center; justify-content: center; color: #059669;">
-                                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.232.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
-                                    </svg>
+                        @php $rosterOpen = (int) $rosterCourseId === (int) $course->id; @endphp
+                        <div wire:key="class-course-{{ $course->id }}" style="background: #F9FAFB; border: 1px solid {{ $rosterOpen ? '#C7D2FE' : '#F3F4F6' }}; border-radius: 8px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 15px;">
+                                <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+                                    {{-- Reorder handles: first course can't go up, last can't go down. --}}
+                                    <div style="display: flex; flex-direction: column; gap: 2px;">
+                                        <button type="button" wire:click="moveCourseUp({{ $course->id }})" @disabled($loop->first) title="Move up"
+                                                style="width: 22px; height: 18px; display: inline-flex; align-items: center; justify-content: center; background: white; border: 1px solid #D1D5DB; border-radius: 4px; color: #4B5563; font-size: 10px; line-height: 1; cursor: {{ $loop->first ? 'not-allowed' : 'pointer' }}; opacity: {{ $loop->first ? '0.4' : '1' }};">&uarr;</button>
+                                        <button type="button" wire:click="moveCourseDown({{ $course->id }})" @disabled($loop->last) title="Move down"
+                                                style="width: 22px; height: 18px; display: inline-flex; align-items: center; justify-content: center; background: white; border: 1px solid #D1D5DB; border-radius: 4px; color: #4B5563; font-size: 10px; line-height: 1; cursor: {{ $loop->last ? 'not-allowed' : 'pointer' }}; opacity: {{ $loop->last ? '0.4' : '1' }};">&darr;</button>
+                                    </div>
+                                    <div style="width: 36px; height: 36px; flex-shrink: 0; border-radius: 8px; background-color: #D1FAE5; display: flex; align-items: center; justify-content: center; color: #059669;">
+                                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.232.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+                                        </svg>
+                                    </div>
+                                    <div style="min-width: 0;">
+                                        <p style="margin: 0; font-weight: 600; font-size: 14px; color: #1F2937;">{{ $course->title }}</p>
+                                        <p style="margin: 0; font-size: 12px; color: #6B7280;">{{ $course->modules_count }} {{ str('Module')->plural($course->modules_count) }}</p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <p style="margin: 0; font-weight: 600; font-size: 14px; color: #1F2937;">{{ $course->title }}</p>
-                                    <p style="margin: 0; font-size: 12px; color: #6B7280;">{{ $course->modules()->count() }} Modules</p>
+                                <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
+                                    <button type="button" wire:click="toggleRoster({{ $course->id }})"
+                                            title="Manage who takes this course"
+                                            style="display: inline-flex; align-items: center; gap: 5px; background: {{ $rosterOpen ? '#EEF2FF' : 'white' }}; border: 1px solid {{ $rosterOpen ? '#C7D2FE' : '#D1D5DB' }}; color: {{ $rosterOpen ? '#3730A3' : '#4B5563' }}; font-size: 12px; font-weight: 600; padding: 6px 10px; border-radius: 6px; cursor: pointer;">
+                                        <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                                        </svg>
+                                        Learners
+                                    </button>
+                                    <a href="{{ route('course.show', $course->id) }}" style="color: #4F46E5; font-size: 12px; font-weight: 600; text-decoration: none;">View</a>
+                                    <button wire:click="removeCourse({{ $course->id }})" wire:confirm="Remove this course from the class? Everyone's completion marks for it here are cleared too." style="background: none; border: none; cursor: pointer; color: #EF4444; padding: 5px; opacity: 0.6; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'">
+                                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                        </svg>
+                                    </button>
                                 </div>
                             </div>
-                            <div style="display: flex; align-items: center; gap: 10px;">
-                                <a href="{{ route('course.show', $course->id) }}" style="color: #4F46E5; font-size: 12px; font-weight: 600; text-decoration: none;">View</a>
-                                <button wire:click="removeCourse({{ $course->id }})" wire:confirm="Are you sure you want to remove this course from the class?" style="background: none; border: none; cursor: pointer; color: #EF4444; padding: 5px; opacity: 0.6; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'">
-                                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                                    </svg>
-                                </button>
-                            </div>
+
+                            {{-- Per-person standing on this one course: progression, promotions, completions --}}
+                            @if($rosterOpen)
+                                <div style="border-top: 1px solid #E5E7EB; padding: 12px 15px; background: white; border-radius: 0 0 8px 8px;">
+                                    @php
+                                        $isFirst = $this->classroom->isFirstCourse($course->id);
+                                        $prevCourse = $this->classroom->previousCourseFor($course->id);
+                                        $nextCourse = $this->classroom->nextCourseFor($course->id);
+                                    @endphp
+                                    @forelse($this->attendees as $attendee)
+                                        @php
+                                            $enrollment = $this->enrollments->get($course->id . '-' . $attendee->id);
+                                            $isRemoved = (bool) $enrollment?->isRemoved();
+                                            $isCompleted = (bool) $enrollment?->isCompleted();
+                                            $isPromoted = (bool) $enrollment?->isPromoted();
+                                            $canPromote = $this->classroom->canPromoteStudent($course->id, $attendee->id);
+                                            $prevFinished = ! $prevCourse || $this->classroom->isCourseFinishedFor($prevCourse, $attendee);
+                                            $canPromoteToNext = $nextCourse && $this->classroom->canPromoteStudent($nextCourse->id, $attendee->id);
+                                        @endphp
+                                        <div wire:key="roster-{{ $course->id }}-{{ $attendee->id }}" style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 0; {{ $loop->last ? '' : 'border-bottom: 1px solid #F3F4F6;' }}">
+                                            <div style="min-width: 0; opacity: {{ $isRemoved ? '0.55' : '1' }};">
+                                                <p style="margin: 0; font-size: 13px; font-weight: 600; color: #1F2937; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                                                    {{ $attendee->displayName() }}
+                                                    @if($isFirst)
+                                                        <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #1D4ED8; background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 9999px; padding: 2px 8px;">First Course</span>
+                                                    @elseif($isPromoted)
+                                                        <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #6D28D9; background: #F5F3FF; border: 1px solid #DDD6FE; border-radius: 9999px; padding: 2px 8px;">Promoted</span>
+                                                    @else
+                                                        <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #6B7280; background: #F3F4F6; border: 1px solid #E5E7EB; border-radius: 9999px; padding: 2px 8px;">Locked</span>
+                                                    @endif
+                                                    @if($isCompleted)
+                                                        <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #047857; background: #ECFDF5; border: 1px solid #A7F3D0; border-radius: 9999px; padding: 2px 8px;">Completed</span>
+                                                    @endif
+                                                    @if($isRemoved)
+                                                        <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #B91C1C; background: #FEF2F2; border: 1px solid #FECACA; border-radius: 9999px; padding: 2px 8px;">Removed</span>
+                                                    @endif
+                                                </p>
+                                                <p style="margin: 3px 0 0; font-size: 11px; color: #6B7280;">
+                                                    @if($isCompleted)
+                                                        Signed off {{ $enrollment->completed_at->format('M j, Y') }}@if($enrollment->completedBy) by {{ $enrollment->completedBy->displayName() }}@endif
+                                                    @elseif($isRemoved)
+                                                        No longer takes this course
+                                                    @elseif(! $isFirst && ! $isPromoted)
+                                                        @if(! $prevFinished)
+                                                            Has not finished "{{ $prevCourse->title }}" yet · Can still be promoted
+                                                        @else
+                                                            Finished previous course · Ready for promotion
+                                                        @endif
+                                                    @elseif($isPromoted && $enrollment?->promoted_at)
+                                                        Promoted {{ $enrollment->promoted_at->format('M j, Y') }}@if($enrollment->promotedBy) by {{ $enrollment->promotedBy->displayName() }}@endif
+                                                    @else
+                                                        {{ $attendee->email }}
+                                                    @endif
+                                                </p>
+                                            </div>
+                                            <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0; flex-wrap: wrap;">
+                                                {{-- Promotion controls --}}
+                                                @if(! $isFirst)
+                                                    @if($isPromoted)
+                                                        <button type="button" wire:click="demoteAttendee({{ $course->id }}, {{ $attendee->id }})"
+                                                                title="Revoke promotion to this course"
+                                                                style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 5px 10px; border-radius: 6px; cursor: pointer; background: #F5F3FF; border: 1px solid #DDD6FE; color: #6D28D9;">
+                                                            Demote
+                                                        </button>
+                                                    @else
+                                                        <button type="button" wire:click="promoteAttendee({{ $course->id }}, {{ $attendee->id }})"
+                                                                @disabled(! $canPromote)
+                                                                @if($canPromote && ! $prevFinished) wire:confirm="{{ $attendee->displayName() }} has not finished &quot;{{ $prevCourse->title }}&quot; yet. Promote them to &quot;{{ $course->title }}&quot; anyway?" @endif
+                                                                title="{{ $prevFinished ? 'Promote to this course' : 'Promote even though the previous course is not finished' }}"
+                                                                style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 5px 10px; border-radius: 6px; cursor: {{ $canPromote ? 'pointer' : 'not-allowed' }}; background: {{ $canPromote ? '#2563EB' : '#F3F4F6' }}; border: 1px solid {{ $canPromote ? '#1D4ED8' : '#D1D5DB' }}; color: {{ $canPromote ? 'white' : '#9CA3AF' }}; opacity: {{ $canPromote ? '1' : '0.6' }};">
+                                                            Promote
+                                                        </button>
+                                                    @endif
+                                                @endif
+
+                                                {{-- Quick promote to next course shortcut --}}
+                                                @if($canPromoteToNext)
+                                                    <button type="button" wire:click="promoteAttendee({{ $nextCourse->id }}, {{ $attendee->id }})"
+                                                            @unless($this->classroom->isCourseFinishedFor($course, $attendee)) wire:confirm="{{ $attendee->displayName() }} has not finished &quot;{{ $course->title }}&quot; yet. Promote them to &quot;{{ $nextCourse->title }}&quot; anyway?" @endunless
+                                                            title="Promote to {{ $nextCourse->title }}"
+                                                            style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 5px 10px; border-radius: 6px; cursor: pointer; background: #4F46E5; border: 1px solid #4338CA; color: white;">
+                                                        Promote to Next &rarr;
+                                                    </button>
+                                                @endif
+
+                                                <button type="button" wire:click="toggleCourseCompleted({{ $course->id }}, {{ $attendee->id }})"
+                                                        title="{{ $isCompleted ? 'Clear completion' : 'Mark this course completed for ' . $attendee->displayName() }}"
+                                                        style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 5px 10px; border-radius: 6px; cursor: pointer;
+                                                               background: {{ $isCompleted ? '#ECFDF5' : 'white' }};
+                                                               border: 1px solid {{ $isCompleted ? '#A7F3D0' : '#D1D5DB' }};
+                                                               color: {{ $isCompleted ? '#047857' : '#4B5563' }};">
+                                                    <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+                                                    </svg>
+                                                    {{ $isCompleted ? 'Completed' : 'Mark done' }}
+                                                </button>
+                                                <button type="button" wire:click="toggleCourseAccess({{ $course->id }}, {{ $attendee->id }})"
+                                                        @if(! $isRemoved) wire:confirm="Remove {{ $attendee->displayName() }} from &quot;{{ $course->title }}&quot;? They stay in the class and keep its other courses." @endif
+                                                        title="{{ $isRemoved ? 'Give this course back' : 'Remove from this course only' }}"
+                                                        style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 5px 10px; border-radius: 6px; cursor: pointer;
+                                                               background: {{ $isRemoved ? '#EEF2FF' : 'white' }};
+                                                               border: 1px solid {{ $isRemoved ? '#C7D2FE' : '#FECACA' }};
+                                                               color: {{ $isRemoved ? '#3730A3' : '#DC2626' }};">
+                                                    {{ $isRemoved ? 'Restore' : 'Remove' }}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    @empty
+                                        <div style="text-align: center; padding: 15px; color: #9CA3AF; font-size: 12px;">
+                                            No attendees in this class yet.
+                                        </div>
+                                    @endforelse
+                                </div>
+                            @endif
                         </div>
                     @empty
                         <div style="text-align: center; padding: 30px; color: #9CA3AF; font-size: 13px;">

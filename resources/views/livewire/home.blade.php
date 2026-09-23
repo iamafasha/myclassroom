@@ -2,6 +2,7 @@
 
 use App\Models\Classroom;
 use App\Models\Course;
+use App\Models\CourseEnrollment;
 use App\Models\LiveClassContent;
 use App\Models\Module;
 use App\Models\ModuleContent;
@@ -27,6 +28,11 @@ new #[Layout('layouts.app')] class extends Component
             $this->classroomId = null;
         }
 
+        // When the user belongs to just one class, default to it so its syllabus order applies automatically.
+        if (! $this->classroomId && $this->classrooms->count() === 1) {
+            $this->classroomId = $this->classrooms->first()->id;
+        }
+
         $this->focusLatestModule();
     }
 
@@ -35,7 +41,7 @@ new #[Layout('layouts.app')] class extends Component
         $this->classroomId = $classroomId && $this->classrooms->contains('id', $classroomId) ? $classroomId : null;
 
         // The old cursor points into a different list of modules now.
-        unset($this->courses, $this->courseIds, $this->modules, $this->latestModule, $this->lessonTotals, $this->currentClassroom);
+        unset($this->courses, $this->courseIds, $this->modules, $this->latestModule, $this->lessonTotals, $this->currentClassroom, $this->upcomingClasses, $this->latestPastClass);
         $this->focusLatestModule();
     }
 
@@ -89,7 +95,8 @@ new #[Layout('layouts.app')] class extends Component
                 fn ($classroom) => $classroom->whereKey($this->classroomId)
             ))
             ->withCount('modules')
-            ->orderBy('title')
+            // Inside one class, follow the syllabus order its manager arranged.
+            ->orderedForClassroom($this->classroomId)
             ->get();
     }
 
@@ -103,18 +110,24 @@ new #[Layout('layouts.app')] class extends Component
     #[Computed]
     public function modules()
     {
+
         if ($this->courseIds->isEmpty()) {
             return collect();
         }
 
+        // Course order comes from the already-ordered course list rather than being
+        // re-derived here, so the carousel and the course cards can never disagree.
+        // sortBy is stable, so each course keeps its own syllabus order within.
+        $coursePosition = $this->courseIds->flip();
+
+
         return Module::with('course')
             ->whereIn('course_id', $this->courseIds)
-            ->join('courses', 'courses.id', '=', 'modules.course_id')
-            ->orderBy('courses.title')
             ->orderBy('modules.sort_order')
             ->orderBy('modules.id')
-            ->select('modules.*')
-            ->get();
+            ->get()
+            ->sortBy(fn (Module $module) => $coursePosition[$module->course_id] ?? PHP_INT_MAX)
+            ->values();
     }
 
     #[Computed]
@@ -252,20 +265,23 @@ new #[Layout('layouts.app')] class extends Component
             ?? $this->lessonQuery()->first();
     }
 
-    /** The next unfinished lesson inside the latest module, for the "latest class" band. */
+    /** The most recent live class that has already ended, for the "latest class" band. */
     #[Computed]
-    public function latestModuleLesson()
+    public function latestPastClass()
     {
-        if (!$this->latestModule) {
+        if ($this->courseIds->isEmpty()) {
             return null;
         }
 
-        $query = fn () => ModuleContent::with('contents.contentable')
-            ->where('module_id', $this->latestModule->id)
-            ->orderBy('sort_order')
-            ->orderBy('id');
-
-        return $query()->whereDoesntHave('progress', $this->finishedByMe())->first() ?? $query()->first();
+        // Started in the past, newest first; one still running is skipped as not over yet.
+        return LiveClassContent::query()
+            ->with('content.moduleContents.module.course')
+            ->whereHas('content.moduleContents.module', fn ($q) => $q->whereIn('course_id', $this->courseIds))
+            ->where('starts_at', '<=', now())
+            ->orderByDesc('starts_at')
+            ->limit(10)
+            ->get()
+            ->first(fn ($class) => $class->status() === 'ended');
     }
 
     private function lessonQuery()
@@ -318,8 +334,16 @@ new #[Layout('layouts.app')] class extends Component
             ->get()
             ->keyBy('course_id');
 
+        // A class manager's sign-off, loaded in one query for the whole rail.
+        $signedOff = CourseEnrollment::query()
+            ->whereIn('course_id', $this->courseIds)
+            ->where('user_id', auth()->id())
+            ->whereNotNull('completed_at')
+            ->pluck('course_id')
+            ->flip();
+
         return $this->courses
-            ->map(function ($course) use ($totals) {
+            ->map(function ($course) use ($totals, $signedOff) {
                 $total = (int) ($totals[$course->id]->total ?? 0);
                 $done = (int) ($totals[$course->id]->done ?? 0);
 
@@ -328,6 +352,7 @@ new #[Layout('layouts.app')] class extends Component
                     'total' => $total,
                     'done' => $done,
                     'percent' => $total > 0 ? (int) round($done / $total * 100) : 0,
+                    'signedOff' => $signedOff->has($course->id),
                 ];
             });
     }
@@ -522,6 +547,15 @@ new #[Layout('layouts.app')] class extends Component
         }
         .btn-solid-dark:hover { background: #3730A3; }
 
+        /* Upcoming class band: the latest-class band in information blue */
+        .upcoming-block { border-bottom-color: #2563EB; }
+        .upcoming-block .latest-head { background: #DBEAFE; color: #1E3A8A; }
+        .upcoming-block .latest-head span { color: #1D4ED8; }
+        .upcoming-block .date-chip-month { color: #2563EB; }
+        .upcoming-block .latest-meta { color: #2563EB; }
+        .upcoming-details-btn { background: #ffffff; color: var(--primary-blue); border: 1px solid #BFDBFE; }
+        .upcoming-details-btn:hover { background: #EFF6FF; }
+
         /* Module carousel */
         .module-tab {
             display: inline-block;
@@ -593,24 +627,6 @@ new #[Layout('layouts.app')] class extends Component
         .side-heading { font-size: 17px; font-weight: 700; color: #111827; margin: 0 0 2px; }
         .side-sub { font-size: 12.5px; color: var(--text-secondary); margin: 0 0 14px; }
 
-        .upcoming-card {
-            position: relative;
-            overflow: hidden;
-            border-radius: 14px;
-            padding: 20px;
-            background: linear-gradient(120deg, #EEF2FF 0%, #E0F2FE 100%);
-            border: 1px solid #DBEAFE;
-            margin-bottom: 28px;
-        }
-
-        .upcoming-art { position: absolute; top: -2px; right: 0; pointer-events: none; opacity: 0.7; }
-        .upcoming-card > *:not(.upcoming-art) { position: relative; }
-
-        .upcoming-label { font-size: 15px; font-weight: 700; color: #1E3A8A; margin-bottom: 10px; }
-        .upcoming-title { font-size: 15px; font-weight: 700; color: #111827; padding-right: 72px; }
-        .upcoming-when { font-size: 12.5px; color: #1D4ED8; font-weight: 600; margin-top: 4px; }
-        .upcoming-course { font-size: 11.5px; color: var(--text-secondary); margin-top: 2px; }
-        .upcoming-empty { font-size: 13.5px; color: #374151; padding: 6px 72px 2px 0; }
 
         .pill-live {
             display: inline-flex; align-items: center; gap: 5px;
@@ -633,6 +649,12 @@ new #[Layout('layouts.app')] class extends Component
         .side-row:hover { border-color: #C7D2FE; box-shadow: 0 2px 6px rgba(16, 24, 40, 0.06); }
 
         .side-row-title { font-size: 13.5px; font-weight: 700; color: #111827; }
+        .side-row-done {
+            display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 9999px;
+            background: #ECFDF5; border: 1px solid #A7F3D0; color: #047857;
+            font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+            vertical-align: middle;
+        }
         .side-row-meta { font-size: 11.5px; color: var(--text-secondary); margin-top: 3px; }
 
         .side-empty { font-size: 13px; color: var(--text-secondary); background: #ffffff; border: 1px dashed var(--border-color); border-radius: 12px; padding: 16px; }
@@ -757,40 +779,81 @@ new #[Layout('layouts.app')] class extends Component
             </div>
         </div>
 
-        {{-- Your latest class --}}
-        @if($this->latestModule)
-            @php
-                $latest = $this->latestModule;
-                $latestProgress = $this->moduleProgress($latest);
-                $latestLesson = $this->latestModuleLesson;
-            @endphp
+        {{-- Your latest class: the most recent live class that has ended --}}
+        @if($latestClass = $this->latestPastClass)
+            @php $latestLesson = $latestClass->moduleContent(); @endphp
             <div class="latest-block">
                 <div class="latest-head">
-                    Your latest class : <span>{{ $latest->course?->title }} — {{ $latest->title }}</span>
+                    Your latest class : <span>{{ $latestClass->course()?->title }}@if($latestLesson?->module) — {{ $latestLesson->module->title }}@endif</span>
                 </div>
                 <div class="latest-body">
                     <div class="date-chip">
-                        <div class="date-chip-month">{{ $latest->created_at->format('M') }}</div>
-                        <div class="date-chip-day">{{ $latest->created_at->format('j') }}</div>
+                        <div class="date-chip-month">{{ $latestClass->starts_at->format('M') }}</div>
+                        <div class="date-chip-day">{{ $latestClass->starts_at->format('j') }}</div>
                     </div>
 
                     <div style="flex: 1; min-width: 0;">
-                        <div class="latest-title">{{ $latestLesson?->label ?? $latest->title }}</div>
-                        <div class="latest-meta">{{ $latestProgress['done'] }} / {{ $latestProgress['total'] }} completed</div>
+                        <div class="latest-title">{{ $latestClass->calendarTitle() }}</div>
+                        <div class="latest-meta">
+                            {{ $latestClass->starts_at->format('D, j M · H:i') }} – {{ $latestClass->endsAt()->format('H:i') }}
+                            · Ended {{ $latestClass->endsAt()->diffForHumans() }}
+                        </div>
                     </div>
 
                     @if($latestLesson)
                         <a href="{{ route('content.show', $latestLesson->id) }}" wire:navigate class="btn-solid-dark">
-                            {{ $latestLesson->isCompletedFor(auth()->user()) ? 'Open' : 'Start' }}
+                            Open
                             <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
                             </svg>
                         </a>
-                    @else
-                        <a href="{{ route('course.module.show', ['courseId' => $latest->course_id, 'moduleId' => $latest->id]) }}" wire:navigate class="btn-solid-dark">
-                            Open module
-                        </a>
                     @endif
+                </div>
+            </div>
+        @endif
+
+        {{-- Upcoming class: the one in progress, or else the next one scheduled --}}
+        @if($upcomingClass = $this->upcomingClasses->first())
+            @php
+                $upcomingLesson = $upcomingClass->moduleContent();
+                $upcomingLive = $upcomingClass->status() === 'live';
+            @endphp
+            <div class="latest-block upcoming-block">
+                <div class="latest-head">
+                    Upcoming class : <span>{{ $upcomingClass->course()?->title }}@if($upcomingLesson?->module) — {{ $upcomingLesson->module->title }}@endif</span>
+                </div>
+                <div class="latest-body">
+                    <div class="date-chip">
+                        <div class="date-chip-month">{{ $upcomingClass->starts_at->format('M') }}</div>
+                        <div class="date-chip-day">{{ $upcomingClass->starts_at->format('j') }}</div>
+                    </div>
+
+                    <div style="flex: 1; min-width: 0;">
+                        <div class="latest-title">
+                            {{ $upcomingClass->calendarTitle() }}
+                            @if($upcomingLive)
+                                <span class="pill-live" style="margin-left: 6px; vertical-align: middle;"><span style="width: 7px; height: 7px; border-radius: 9999px; background: #DC2626;"></span> Live now</span>
+                            @endif
+                        </div>
+                        <div class="latest-meta">
+                            {{ $upcomingClass->starts_at->format('D, j M · H:i') }} – {{ $upcomingClass->endsAt()->format('H:i') }}
+                            · {{ $upcomingLive ? 'Started ' . $upcomingClass->starts_at->diffForHumans() : 'Starts ' . $upcomingClass->starts_at->diffForHumans() }}
+                        </div>
+                    </div>
+
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        @if($upcomingClass->canJoin())
+                            <a href="{{ $upcomingClass->join_link }}" target="_blank" rel="noopener" class="btn-primary">
+                                Join
+                                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                                </svg>
+                            </a>
+                        @endif
+                        @if($upcomingLesson)
+                            <a href="{{ route('content.show', $upcomingLesson->id) }}" wire:navigate class="btn-primary upcoming-details-btn">Details</a>
+                        @endif
+                    </div>
                 </div>
             </div>
         @endif
@@ -898,46 +961,6 @@ new #[Layout('layouts.app')] class extends Component
     </div>
 
     <aside class="home-side">
-        {{-- Upcoming class --}}
-        @php $nextClass = $this->upcomingClasses->first(); @endphp
-        <div class="upcoming-card">
-            {{-- Decorative: a laptop tucked into the corner of the card. --}}
-            <svg class="upcoming-art" width="120" height="90" viewBox="0 0 120 90" fill="none" aria-hidden="true">
-                <circle cx="86" cy="26" r="44" fill="#BFDBFE" opacity="0.45" />
-                <rect x="46" y="20" width="58" height="38" rx="4" fill="#ffffff" stroke="#93C5FD" stroke-width="2" />
-                <rect x="52" y="26" width="46" height="26" rx="2" fill="#DBEAFE" />
-                <path d="M38 62h74l-6 8H44l-6-8z" fill="#ffffff" stroke="#93C5FD" stroke-width="2" stroke-linejoin="round" />
-            </svg>
-
-            <div class="upcoming-label">Upcoming Class</div>
-
-            @if($nextClass)
-                @if($nextClass->status() === 'live')
-                    <span class="pill-live"><span style="width: 7px; height: 7px; border-radius: 9999px; background: #DC2626;"></span> Live now</span>
-                @endif
-                <div class="upcoming-title" style="margin-top: {{ $nextClass->status() === 'live' ? '8px' : '0' }};">
-                    {{ $nextClass->calendarTitle() }}
-                </div>
-                <div class="upcoming-when">
-                    {{ $nextClass->starts_at->format('D, j M · H:i') }} – {{ $nextClass->endsAt()->format('H:i') }}
-                    ({{ $nextClass->starts_at->diffForHumans() }})
-                </div>
-                <div class="upcoming-course">{{ $nextClass->course()?->title }}</div>
-
-                <div style="display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap;">
-                    @if($nextClass->canJoin())
-                        <a href="{{ $nextClass->join_link }}" target="_blank" rel="noopener" class="btn-primary" style="padding: 8px 14px;">Join class</a>
-                    @endif
-                    @if($nextClass->moduleContent())
-                        <a href="{{ route('content.show', $nextClass->moduleContent()->id) }}" wire:navigate class="btn-primary"
-                           style="padding: 8px 14px; background: #ffffff; color: var(--primary-blue); border: 1px solid #BFDBFE;">Details</a>
-                    @endif
-                </div>
-            @else
-                <div class="upcoming-empty">Class details will be updated soon!</div>
-            @endif
-        </div>
-
         {{-- Later this week --}}
         @if($this->upcomingClasses->count() > 1)
             <h2 class="side-heading">Coming up</h2>
@@ -971,7 +994,12 @@ new #[Layout('layouts.app')] class extends Component
             <div class="side-list">
                 @foreach($this->courseProgress as $row)
                     <a class="side-row" href="{{ route('course.show', $row['course']->id) }}" wire:navigate>
-                        <div class="side-row-title">{{ $row['course']->title }}</div>
+                        <div class="side-row-title">
+                            {{ $row['course']->title }}
+                            @if($row['signedOff'])
+                                <span class="side-row-done" title="Your class manager marked this course completed">Completed</span>
+                            @endif
+                        </div>
                         <div class="side-row-meta">
                             {{ $row['course']->modules_count }} {{ \Illuminate\Support\Str::plural('module', $row['course']->modules_count) }}
                             · {{ $row['done'] }}/{{ $row['total'] }} lessons done

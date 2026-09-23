@@ -64,11 +64,11 @@ it('shows a freshly invited member nothing as completed', function () {
 
     $this->actingAs($newcomer)->get(route('home'))
         ->assertOk()
-        ->assertSee('0 / 2 completed');
+        ->assertSee('0% of this module done');
 
     $this->actingAs($owner)->get(route('home'))
         ->assertOk()
-        ->assertSee('2 / 2 completed');
+        ->assertSee('100% of this module done');
 });
 
 it('ticks a lesson off for the person clicking and nobody else', function () {

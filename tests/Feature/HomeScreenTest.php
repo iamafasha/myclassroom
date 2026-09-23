@@ -64,44 +64,96 @@ it('skips lessons already completed', function () {
         ->assertSee(route('content.show', $lessons['Deep Dive']->id), false);
 });
 
-it('shows the latest module with its progress and course', function () {
+/** Puts a live class into the module as its own lesson. */
+function addLiveClass(Module $module, string $title, $startsAt, array $attributes = []): array
+{
+    $liveClass = new LiveClassContent();
+    $liveClass->title = $title;
+    $liveClass->starts_at = $startsAt;
+    $liveClass->duration_minutes = 60;
+    foreach ($attributes as $key => $value) {
+        $liveClass->{$key} = $value;
+    }
+    $liveClass->save();
+
+    $lesson = ModuleContent::create(['module_id' => $module->id, 'label' => $title, 'sort_order' => 9]);
+    $content = Content::create(['contentable_type' => LiveClassContent::class, 'contentable_id' => $liveClass->id]);
+    $lesson->contents()->attach($content->id, ['sort_order' => 1]);
+
+    return [$liveClass, $lesson];
+}
+
+it('shows the module carousel with its progress and course', function () {
     [$student, , $module, $lessons] = seedHome();
     $lessons['Intro']->markCompletedFor($student);
 
     $this->actingAs($student)->get(route('home'))
         ->assertOk()
-        ->assertSee('Your latest class')
         ->assertSee('Frontend 1: Intro to HTML')
         ->assertSee('Frontend Track')
-        ->assertSee('1 / 2 completed')
         ->assertSee('50% of this module done');
 });
 
-it('shows the next live class in the side rail', function () {
+it('shows the most recent ended live class as the latest class', function () {
     [$student, , $module] = seedHome();
-
-    $liveClass = new LiveClassContent();
-    $liveClass->title = 'Live Q&A Session';
-    $liveClass->starts_at = now()->addDays(2);
-    $liveClass->save();
-
-    $lesson = ModuleContent::create(['module_id' => $module->id, 'label' => 'Q&A', 'sort_order' => 9]);
-    $content = Content::create(['contentable_type' => LiveClassContent::class, 'contentable_id' => $liveClass->id]);
-    $lesson->contents()->attach($content->id, ['sort_order' => 1]);
+    addLiveClass($module, 'Older Session', now()->subDays(5));
+    [, $recent] = addLiveClass($module, 'Recent Session', now()->subDays(2));
+    addLiveClass($module, 'Running Session', now()->subMinutes(10));
+    addLiveClass($module, 'Future Session', now()->addDays(2));
 
     $this->actingAs($student)->get(route('home'))
         ->assertOk()
-        ->assertSee('Upcoming Class')
-        ->assertSee('Live Q&amp;A Session', false)
-        ->assertDontSee('Class details will be updated soon!');
+        ->assertSeeInOrder(['Your latest class', 'Recent Session', route('content.show', $recent->id)], false)
+        ->assertDontSee('Older Session');
 });
 
-it('falls back to a placeholder when no class is scheduled', function () {
+it('hides the latest class band when no live class has ended yet', function () {
+    [$student, , $module] = seedHome();
+    addLiveClass($module, 'Future Session', now()->addDays(2));
+
+    $this->actingAs($student)->get(route('home'))
+        ->assertOk()
+        ->assertDontSee('Your latest class');
+});
+
+it('shows the class in progress as the upcoming class with a join button', function () {
+    [$student, , $module] = seedHome();
+    addLiveClass($module, 'Running Session', now()->subMinutes(10), ['is_join_enabled' => true, 'join_link' => 'https://meet.example.com/abc']);
+    addLiveClass($module, 'Future Session', now()->addDays(2));
+
+    $this->actingAs($student)->get(route('home'))
+        ->assertOk()
+        ->assertSeeInOrder(['Upcoming class :', 'Running Session', 'Live now', 'https://meet.example.com/abc'], false);
+});
+
+it('shows the next scheduled class as the upcoming class without a join button when joining is off', function () {
+    [$student, , $module] = seedHome();
+    addLiveClass($module, 'Future Session', now()->addDays(2), ['is_join_enabled' => false, 'join_link' => 'https://meet.example.com/hidden']);
+
+    $this->actingAs($student)->get(route('home'))
+        ->assertOk()
+        ->assertSeeInOrder(['Upcoming class :', 'Future Session'], false)
+        ->assertDontSee('https://meet.example.com/hidden');
+});
+
+it('lists later live classes in the side rail, leaving the next one to the upcoming band', function () {
+    [$student, , $module] = seedHome();
+    addLiveClass($module, 'Live Q&A Session', now()->addDays(2));
+    addLiveClass($module, 'Revision Session', now()->addDays(4));
+
+    $this->actingAs($student)->get(route('home'))
+        ->assertOk()
+        ->assertSeeInOrder(['Upcoming class :', 'Live Q&amp;A Session', 'Coming up', 'Revision Session'], false)
+        ->assertDontSee('Upcoming Class');
+});
+
+it('shows no upcoming class when none is scheduled', function () {
     [$student] = seedHome();
 
     $this->actingAs($student)->get(route('home'))
         ->assertOk()
-        ->assertSee('Class details will be updated soon!');
+        ->assertDontSee('Upcoming class :')
+        ->assertDontSee('Coming up');
 });
 
 it('does not leak courses from classes the user is not in', function () {

@@ -47,7 +47,7 @@ new #[Layout('layouts.app')] class extends Component {
     #[Computed]
     public function attendingClassrooms()
     {
-        return Classroom::with(['admin', 'courses'])
+        return Classroom::with(['admin', 'courses' => fn ($q) => $q->visibleTo(auth()->user())])
             ->whereHas('users', fn ($q) => $q->where('users.id', auth()->id()))
             ->where('admin_id', '!=', auth()->id())
             ->latest()

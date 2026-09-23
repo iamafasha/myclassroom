@@ -31,13 +31,27 @@ it('renders an uploaded video in the fitted player with fullscreen controls', fu
 
     $response = $this->actingAs($owner)->get(route('content.show', $moduleContent->id))->assertOk();
 
-    $response->assertSee('class="video-player"', false)
+    $response->assertSee('class="video-player cs-bleed"', false)
         ->assertSee('uploads/clip.mp4', false)
         // Capped so the whole frame stays on screen, letterboxed rather than cropped.
         ->assertSee('max-height: 70vh', false)
         ->assertSee('object-fit: contain', false)
         ->assertSee('.video-player:fullscreen', false)
         ->assertSee('data-role="fullscreen"', false);
+});
+
+it('runs media edge to edge on a phone without breaking fullscreen', function () {
+    ['owner' => $owner, 'moduleContent' => $moduleContent] = seedVideoLesson('http://localhost/storage/uploads/clip.mp4');
+
+    $this->actingAs($owner)->get(route('content.show', $moduleContent->id))
+        ->assertOk()
+        // Cancels the reading view's and the content card's side padding.
+        ->assertSee('.content-read .cs-bleed', false)
+        ->assertSee('margin-left: -32px', false)
+        // The bleed must not follow the player into fullscreen.
+        ->assertSee('.content-read .cs-bleed:fullscreen { margin: 0; }', false)
+        // The desktop width cap is what kept the frame narrow on a phone.
+        ->assertSee('.video-frame { max-width: none; }', false);
 });
 
 it('offers the full control set on the uploaded player', function () {
@@ -67,8 +81,10 @@ it('renders a youtube video in a fullscreen capable frame', function () {
 
     $this->actingAs($owner)->get(route('content.show', $moduleContent->id))
         ->assertOk()
-        ->assertSee('class="video-frame"', false)
+        ->assertSee('class="video-frame cs-bleed"', false)
         ->assertSee("'fs': 1", false)
         ->assertSee('allowfullscreen', false)
-        ->assertDontSee('class="video-player"', false);
+        // The uploaded-file player and its controls have no place here. Keyed on the
+        // control markup rather than the class, which the stylesheet also mentions.
+        ->assertDontSee('data-role="fullscreen"', false);
 });
