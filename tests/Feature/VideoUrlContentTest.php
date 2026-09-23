@@ -1,6 +1,6 @@
 <?php
 
-use App\Jobs\DownloadVideoContent;
+use App\Jobs\NotifyClassOfNewContent;
 use App\Models\{Classroom, Course, Module, ModuleContent, VideoContent};
 use App\Models\User;
 use Illuminate\Support\Facades\Process;
@@ -21,8 +21,9 @@ function seedVideoModuleContent(): array
     return compact('owner', 'moduleContent');
 }
 
-it('saves a video link straight away and leaves the form', function () {
+it('saves a youtube link as-is without copying the video to the server', function () {
     Queue::fake();
+    Process::fake();
 
     ['owner' => $owner, 'moduleContent' => $moduleContent] = seedVideoModuleContent();
 
@@ -35,76 +36,18 @@ it('saves a video link straight away and leaves the form', function () {
         ->set('videoEndTime', '01:15')
         ->call('save')
         ->assertHasNoErrors()
-        // The bug: the download ran inline, so the request timed out here instead.
         ->assertRedirect(route('content.show', $moduleContent->id));
 
     $video = VideoContent::first();
 
-    // Playable from the link the moment it is saved, trim points intact.
+    // Plays from the link, trim points intact.
     expect($video->file_url)->toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ')
         ->and($video->start_time)->toBe('00:30')
         ->and($video->end_time)->toBe('01:15')
         ->and($moduleContent->fresh()->contents)->toHaveCount(1);
 
-    Queue::assertPushed(
-        DownloadVideoContent::class,
-        fn ($job) => $job->videoContentId === $video->id
-            && $job->sourceUrl === 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
-            && $job->startTime === '00:30'
-            && $job->endTime === '01:15'
-    );
-});
-
-it('does not queue a download for a video picked from uploaded files', function () {
-    Queue::fake();
-
-    ['owner' => $owner, 'moduleContent' => $moduleContent] = seedVideoModuleContent();
-
-    $file = App\Models\File::create([
-        'user_id' => $owner->id,
-        'name' => 'Clip',
-        'file_path' => 'uploads/clip.mp4',
-        'file_type' => 'video',
-    ]);
-
-    Livewire::actingAs($owner)->test('create-content-form', ['moduleContentId' => $moduleContent->id])
-        ->set('type', 'video')
-        ->set('label', 'Uploaded clip')
-        ->set('videoSourceType', 'file')
-        ->set('videoFileId', $file->id)
-        ->call('save')
-        ->assertHasNoErrors()
-        ->assertRedirect(route('content.show', $moduleContent->id));
-
-    // The class announcement still goes out; only the download is skipped.
-    Queue::assertNotPushed(DownloadVideoContent::class);
-});
-
-it('leaves the content on its link when the download fails', function () {
-    Process::fake(['*' => Process::result(output: 'ERROR: unavailable', exitCode: 1)]);
-
-    $video = new VideoContent();
-    $video->name = 'Clip';
-    $video->file_url = 'https://example.com/clip.mp4';
-    $video->save();
-
-    (new DownloadVideoContent($video->id, 'https://example.com/clip.mp4'))->handle();
-
-    // Still playable from the source: a failed fetch must not break the content.
-    expect($video->fresh()->file_url)->toBe('https://example.com/clip.mp4');
-});
-
-it('does not fetch anything for a content that moved on while queued', function () {
-    Process::fake();
-
-    $video = new VideoContent();
-    $video->name = 'Clip';
-    $video->file_url = 'https://example.com/clip.mp4';
-    $video->save();
-
-    // The teacher edited the content to a different source after queueing.
-    (new DownloadVideoContent($video->id, 'https://example.com/old.mp4'))->handle();
-
+    // Nothing fetches the video: no background job and no yt-dlp run.
+    expect(collect(array_keys(Queue::pushedJobs()))->reject(fn ($job) => $job === NotifyClassOfNewContent::class)->all())
+        ->toBe([]);
     Process::assertNothingRan();
-    expect($video->fresh()->file_url)->toBe('https://example.com/clip.mp4');
 });

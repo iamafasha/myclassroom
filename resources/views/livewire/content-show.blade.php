@@ -376,7 +376,6 @@ new #[Layout('layouts.app')] class extends Component
             /* Edge-to-edge means no side chrome: rounded corners and side
                borders only read as damage once the block touches the screen. */
             .content-read .cs-bleed,
-            .content-read .cs-bleed .video-frame-inner,
             .content-read .cs-bleed .video-player,
             .content-read .cs-bleed img {
                 border-radius: 0;
@@ -695,13 +694,16 @@ new #[Layout('layouts.app')] class extends Component
 
                 @once
                     <style>
-                        /* Keep the frame inside the viewport, letterboxing rather than cropping or overflowing. */
-                        .video-frame { width: 100%; max-width: calc(70vh * 16 / 9); margin: 0 auto; }
-                        .video-frame-inner { position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); border: 1px solid #E5E7EB; background: #000; }
-                        .video-frame-inner > * { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
 
                         .video-player { position: relative; width: 100%; max-height: 70vh; margin: 0 auto; background: #000; border-radius: 8px; overflow: hidden; border: 1px solid #E5E7EB; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); display: flex; align-items: center; justify-content: center; outline: none; }
                         .video-player video { display: block; width: 100%; max-height: 70vh; object-fit: contain; background: #000; }
+
+                        /* YouTube: a 16:9 box kept inside the viewport, the iframe filling it under our controls. */
+                        .video-player.is-youtube { aspect-ratio: 16 / 9; width: 100%; max-width: calc(70vh * 16 / 9); }
+                        .video-player-yt, .video-player-yt iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+                        .video-player-shield { position: absolute; inset: 0; pointer-events: none; }
+                        .video-player-shield.is-active { pointer-events: auto; }
+                        .video-player.is-youtube:fullscreen, .video-player.is-youtube:-webkit-full-screen { max-width: none; aspect-ratio: auto; }
 
                         /* Fullscreen: fill the screen, drop the page chrome, let the video use the full height. */
                         .video-player:fullscreen, .video-player:-webkit-full-screen { max-height: none; width: 100vw; height: 100vh; border: none; border-radius: 0; }
@@ -730,117 +732,25 @@ new #[Layout('layouts.app')] class extends Component
                             /* Full-bleed on a phone: drop the desktop width cap and the
                                shadow, and let the frame use the whole screen width. The
                                70vh height cap goes too — width is the scarce axis here. */
-                            .video-frame { max-width: none; }
-                            .video-frame-inner { box-shadow: none; }
                             .video-player { max-height: none; box-shadow: none; }
+                            .video-player.is-youtube { max-width: none; }
                             .video-player video { max-height: none; }
                         }
                     </style>
                 @endonce
 
-                @if($youtubeId)
-                    <div class="video-frame cs-bleed">
-                        <div class="video-frame-inner">
-                            <div id="yt-player-{{ $uid }}"></div>
-                        </div>
-                    </div>
-
-                    @once
-                        <script>
-                            window.ytInitQueue = window.ytInitQueue || [];
-                            window.initYtPlayer = window.initYtPlayer || function(elementId, videoId, ytStartSec, ytEndSec) {
-                                let player;
-                                let ytInterval = null;
-
-                                player = new YT.Player(elementId, {
-                                    videoId: videoId,
-                                    playerVars: {
-                                        'start': ytStartSec,
-                                        'end': ytEndSec ? ytEndSec : undefined,
-                                        'rel': 0,
-                                        'modestbranding': 1,
-                                        'enablejsapi': 1,
-                                        'fs': 1
-                                    },
-                                    events: {
-                                        'onReady': function(event) {
-                                            const iframe = player.getIframe();
-                                            if (iframe) {
-                                                iframe.setAttribute('allowfullscreen', '');
-                                                iframe.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen');
-                                            }
-                                            if (ytStartSec) {
-                                                player.seekTo(ytStartSec, true);
-                                            }
-                                        },
-                                        'onStateChange': function(event) {
-                                            if (event.data === YT.PlayerState.PLAYING) {
-                                                if (!ytInterval) {
-                                                    ytInterval = setInterval(checkYtBounds, 250);
-                                                }
-                                            } else {
-                                                if (ytInterval) {
-                                                    clearInterval(ytInterval);
-                                                    ytInterval = null;
-                                                }
-                                            }
-                                        }
-                                    }
-                                });
-
-                                function checkYtBounds() {
-                                    if (!player || typeof player.getCurrentTime !== 'function') return;
-                                    const currentTime = player.getCurrentTime();
-                                    if (ytStartSec !== null && currentTime < ytStartSec) {
-                                        player.seekTo(ytStartSec, true);
-                                    }
-                                    if (ytEndSec !== null && currentTime >= ytEndSec) {
-                                        player.pauseVideo();
-                                        player.seekTo(ytEndSec, true);
-                                    }
-                                }
-                            };
-
-                            window.onYouTubeIframeAPIReady = window.onYouTubeIframeAPIReady || function() {
-                                window.ytInitQueue.forEach(function(fn) { fn(); });
-                                window.ytInitQueue = [];
-                            };
-                        </script>
-                    @endonce
-
-                    <script>
-                        (function() {
-                            const elementId = 'yt-player-{{ $uid }}';
-                            const ytVideoId = "{{ $youtubeId }}";
-                            const ytStartSec = {{ $startSeconds ?? '0' }};
-                            const ytEndSec = {{ $endSeconds ?? 'null' }};
-
-                            function doInit() {
-                                window.initYtPlayer(elementId, ytVideoId, ytStartSec, ytEndSec);
-                            }
-
-                            if (window.YT && window.YT.Player) {
-                                doInit();
-                            } else {
-                                window.ytInitQueue = window.ytInitQueue || [];
-                                window.ytInitQueue.push(doInit);
-
-                                if (!window.ytApiTagInserted) {
-                                    window.ytApiTagInserted = true;
-                                    var tag = document.createElement('script');
-                                    tag.src = "https://www.youtube.com/iframe_api";
-                                    var firstScriptTag = document.getElementsByTagName('script')[0];
-                                    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-                                }
-                            }
-                        })();
-                    </script>
-                @else
-                    <div class="video-player cs-bleed" id="video-container-{{ $uid }}" tabindex="0">
-                        <video id="course-video-{{ $uid }}" playsinline preload="metadata">
-                            <source src="{{ $videoUrl }}">
-                            Your browser does not support the video tag.
-                        </video>
+                    <div class="video-player cs-bleed{{ $youtubeId ? ' is-youtube' : '' }}" id="video-container-{{ $uid }}" tabindex="0">
+                        @if($youtubeId)
+                            {{-- Streams straight from YouTube: nothing is copied to this server. --}}
+                            <div class="video-player-yt"><div id="yt-player-{{ $uid }}"></div></div>
+                            {{-- Catches clicks once playing, so they drive these controls rather than YouTube's own UI. --}}
+                            <div class="video-player-shield" data-role="shield"></div>
+                        @else
+                            <video id="course-video-{{ $uid }}" playsinline preload="metadata">
+                                <source src="{{ $videoUrl }}">
+                                Your browser does not support the video tag.
+                            </video>
+                        @endif
 
                         <!-- Custom Controls -->
                         <div class="video-player-controls" id="video-controls-{{ $uid }}">
@@ -886,200 +796,336 @@ new #[Layout('layouts.app')] class extends Component
                         </div>
                     </div>
 
+                    @once
+                        <script>
+                            /*
+                             * One set of controls for every video. The player talks to a small "media"
+                             * adapter, so an uploaded file (<video>) and a YouTube link (iframe API)
+                             * share the same seek bar, clip window, speed, volume and fullscreen.
+                             */
+                            window.coursePlayerVideoMedia = window.coursePlayerVideoMedia || function(video) {
+                                return {
+                                    clickTarget: video,
+                                    play: () => video.play(),
+                                    pause: () => video.pause(),
+                                    isPaused: () => video.paused,
+                                    getTime: () => video.currentTime,
+                                    setTime: t => { video.currentTime = t; },
+                                    getDuration: () => video.duration,
+                                    isMuted: () => video.muted,
+                                    setMuted: m => { video.muted = m; },
+                                    getVolume: () => video.volume,
+                                    setVolume: v => { video.volume = v; },
+                                    getRate: () => video.playbackRate,
+                                    setRate: r => { video.playbackRate = r; },
+                                    pip: document.pictureInPictureEnabled && !video.disablePictureInPicture
+                                        ? () => document.pictureInPictureElement
+                                            ? document.exitPictureInPicture()
+                                            : video.requestPictureInPicture().catch(() => {})
+                                        : null,
+                                    // iOS Safari only goes fullscreen through its own player.
+                                    nativeFullscreen: video.webkitEnterFullscreen ? () => video.webkitEnterFullscreen() : null,
+                                    on(event, fn) {
+                                        if (event === 'ready') {
+                                            if (video.readyState >= 1) fn(); else video.addEventListener('loadedmetadata', fn);
+                                        } else {
+                                            video.addEventListener(event === 'time' ? 'timeupdate' : event, fn);
+                                        }
+                                    },
+                                };
+                            };
+
+                            window.coursePlayerYoutubeMedia = window.coursePlayerYoutubeMedia || function(elementId, videoId, startSec, endSec, shield) {
+                                const handlers = { ready: [], play: [], pause: [], ended: [], time: [] };
+                                const emit = name => handlers[name].forEach(fn => fn());
+                                let player = null, ready = false, paused = true, muted = false, volume = 1, rate = 1, ticker = null;
+
+                                function create() {
+                                    player = new YT.Player(elementId, {
+                                        videoId: videoId,
+                                        playerVars: {
+                                            'controls': 0,
+                                            'disablekb': 1,
+                                            'fs': 0,
+                                            'rel': 0,
+                                            'modestbranding': 1,
+                                            'iv_load_policy': 3,
+                                            'playsinline': 1,
+                                            'enablejsapi': 1,
+                                            'start': startSec || undefined,
+                                            'end': endSec || undefined,
+                                        },
+                                        events: {
+                                            onReady: function() {
+                                                ready = true;
+                                                muted = player.isMuted();
+                                                volume = player.getVolume() / 100;
+                                                emit('ready');
+                                            },
+                                            onStateChange: function(event) {
+                                                if (event.data === YT.PlayerState.PLAYING) {
+                                                    paused = false;
+                                                    // First playback may start from YouTube's own play button (mobile
+                                                    // needs a tap on the frame); from then on the shield takes clicks.
+                                                    shield.classList.add('is-active');
+                                                    emit('play');
+                                                    if (!ticker) ticker = setInterval(() => emit('time'), 250);
+                                                } else if (event.data === YT.PlayerState.PAUSED || event.data === YT.PlayerState.ENDED) {
+                                                    paused = true;
+                                                    clearInterval(ticker);
+                                                    ticker = null;
+                                                    emit('time');
+                                                    emit(event.data === YT.PlayerState.ENDED ? 'ended' : 'pause');
+                                                }
+                                            },
+                                        },
+                                    });
+                                }
+
+                                if (window.YT && window.YT.Player) {
+                                    create();
+                                } else {
+                                    window.ytInitQueue = window.ytInitQueue || [];
+                                    window.ytInitQueue.push(create);
+                                    window.onYouTubeIframeAPIReady = function() {
+                                        window.ytInitQueue.forEach(fn => fn());
+                                        window.ytInitQueue = [];
+                                    };
+                                    if (!window.ytApiTagInserted) {
+                                        window.ytApiTagInserted = true;
+                                        const tag = document.createElement('script');
+                                        tag.src = 'https://www.youtube.com/iframe_api';
+                                        document.head.appendChild(tag);
+                                    }
+                                }
+
+                                // Mute, volume and speed are tracked here: YouTube reports them back lazily.
+                                return {
+                                    clickTarget: shield,
+                                    play: () => ready && player.playVideo(),
+                                    pause: () => ready && player.pauseVideo(),
+                                    isPaused: () => paused,
+                                    getTime: () => ready ? player.getCurrentTime() : 0,
+                                    setTime: t => { if (ready) player.seekTo(t, true); },
+                                    getDuration: () => ready ? player.getDuration() : 0,
+                                    isMuted: () => muted,
+                                    setMuted: m => { if (!ready) return; muted = m; m ? player.mute() : player.unMute(); },
+                                    getVolume: () => volume,
+                                    setVolume: v => { if (!ready) return; volume = v; player.setVolume(Math.round(v * 100)); },
+                                    getRate: () => rate,
+                                    setRate: r => { if (!ready) return; rate = r; player.setPlaybackRate(r); },
+                                    pip: null,
+                                    nativeFullscreen: null,
+                                    on(event, fn) {
+                                        if (event === 'ready' && ready) fn(); else handlers[event].push(fn);
+                                    },
+                                };
+                            };
+
+                            window.initCoursePlayer = window.initCoursePlayer || function(container, media, startSec, endSec) {
+                                const el = role => container.querySelector('[data-role="' + role + '"]');
+                                const seekBar = el('seek');
+                                const timeDisplay = el('time');
+                                const iconPlay = el('icon-play');
+                                const iconPause = el('icon-pause');
+                                const iconVolume = el('icon-volume');
+                                const iconMuted = el('icon-muted');
+                                const iconExpand = el('icon-expand');
+                                const iconCollapse = el('icon-collapse');
+                                const volumeSlider = el('volume');
+                                const speedBtn = el('speed');
+                                const pipBtn = el('pip');
+
+                                const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+                                let idleTimer = null;
+                                let ready = false;
+
+                                function formatTime(seconds) {
+                                    if (isNaN(seconds)) return "00:00";
+                                    const m = Math.floor(seconds / 60);
+                                    const s = Math.floor(seconds % 60);
+                                    return (m < 10 ? "0" + m : m) + ":" + (s < 10 ? "0" + s : s);
+                                }
+
+                                function showPlaying(playing) {
+                                    iconPlay.style.display = playing ? 'none' : 'block';
+                                    iconPause.style.display = playing ? 'block' : 'none';
+                                    el('play').setAttribute('aria-label', playing ? 'Pause' : 'Play');
+                                    if (!playing) wake(false);
+                                }
+
+                                function updateDisplay() {
+                                    if (!ready) return;
+                                    const currentRel = Math.max(0, media.getTime() - startSec);
+                                    const durationRel = Math.max(0, endSec - startSec);
+
+                                    seekBar.max = durationRel;
+                                    seekBar.value = currentRel;
+                                    timeDisplay.textContent = formatTime(currentRel) + " / " + formatTime(durationRel);
+                                }
+
+                                function togglePlay() {
+                                    if (media.isPaused()) {
+                                        if (endSec !== null && media.getTime() >= endSec) media.setTime(startSec);
+                                        media.play();
+                                    } else {
+                                        media.pause();
+                                    }
+                                }
+
+                                function skip(seconds) {
+                                    const target = media.getTime() + seconds;
+                                    media.setTime(Math.min(Math.max(target, startSec ?? 0), endSec ?? media.getDuration()));
+                                    updateDisplay();
+                                }
+
+                                media.on('play', () => showPlaying(true));
+                                media.on('pause', () => showPlaying(false));
+                                media.on('ended', () => showPlaying(false));
+
+                                el('play').addEventListener('click', togglePlay);
+                                media.clickTarget.addEventListener('click', togglePlay);
+                                media.clickTarget.addEventListener('dblclick', toggleFullscreen);
+                                el('back').addEventListener('click', () => skip(-10));
+                                el('forward').addEventListener('click', () => skip(10));
+
+                                // Keep playback inside the clip window.
+                                media.on('time', function() {
+                                    const now = media.getTime();
+                                    if (startSec !== null && now < startSec) {
+                                        media.setTime(startSec);
+                                    }
+                                    if (endSec !== null && now >= endSec && !media.isPaused()) {
+                                        media.pause();
+                                        media.setTime(endSec);
+                                    }
+                                    updateDisplay();
+                                });
+
+                                seekBar.addEventListener('input', function() {
+                                    media.setTime((startSec ?? 0) + parseFloat(seekBar.value));
+                                    updateDisplay();
+                                });
+
+                                // Volume
+                                function showMuted() {
+                                    const muted = media.isMuted() || media.getVolume() === 0;
+                                    iconVolume.style.display = muted ? 'none' : 'block';
+                                    iconMuted.style.display = muted ? 'block' : 'none';
+                                    el('mute').setAttribute('aria-label', muted ? 'Unmute' : 'Mute');
+                                }
+                                el('mute').addEventListener('click', function() {
+                                    media.setMuted(!media.isMuted());
+                                    if (!media.isMuted() && media.getVolume() === 0) media.setVolume(1);
+                                    volumeSlider.value = media.isMuted() ? 0 : media.getVolume();
+                                    showMuted();
+                                });
+                                volumeSlider.addEventListener('input', function() {
+                                    media.setVolume(parseFloat(volumeSlider.value));
+                                    media.setMuted(media.getVolume() === 0);
+                                    showMuted();
+                                });
+
+                                // Playback speed
+                                speedBtn.addEventListener('click', function() {
+                                    const next = SPEEDS[(SPEEDS.indexOf(media.getRate()) + 1) % SPEEDS.length];
+                                    media.setRate(next);
+                                    speedBtn.textContent = next + 'x';
+                                });
+
+                                // Picture in picture, where the browser supports it
+                                if (media.pip) {
+                                    pipBtn.style.display = 'flex';
+                                    pipBtn.addEventListener('click', media.pip);
+                                }
+
+                                // Fullscreen
+                                function fullscreenElement() {
+                                    return document.fullscreenElement || document.webkitFullscreenElement || null;
+                                }
+                                function toggleFullscreen() {
+                                    if (fullscreenElement()) {
+                                        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+                                    } else if (container.requestFullscreen) {
+                                        container.requestFullscreen().catch(() => {});
+                                    } else if (container.webkitRequestFullscreen) {
+                                        container.webkitRequestFullscreen();
+                                    } else if (media.nativeFullscreen) {
+                                        media.nativeFullscreen();
+                                    }
+                                }
+                                function showFullscreen() {
+                                    const isFull = fullscreenElement() === container;
+                                    iconExpand.style.display = isFull ? 'none' : 'block';
+                                    iconCollapse.style.display = isFull ? 'block' : 'none';
+                                    el('fullscreen').setAttribute('aria-label', isFull ? 'Exit fullscreen' : 'Fullscreen');
+                                }
+                                el('fullscreen').addEventListener('click', toggleFullscreen);
+                                document.addEventListener('fullscreenchange', showFullscreen);
+                                document.addEventListener('webkitfullscreenchange', showFullscreen);
+
+                                // Hide the controls while playing and untouched, so the video is unobstructed.
+                                function wake(scheduleHide) {
+                                    container.classList.remove('is-idle');
+                                    clearTimeout(idleTimer);
+                                    if (scheduleHide !== false && !media.isPaused()) {
+                                        idleTimer = setTimeout(() => container.classList.add('is-idle'), 2500);
+                                    }
+                                }
+                                container.addEventListener('mousemove', () => wake(true));
+                                container.addEventListener('mouseleave', () => { if (!media.isPaused()) container.classList.add('is-idle') });
+                                container.addEventListener('touchstart', () => wake(true), { passive: true });
+
+                                // Keyboard shortcuts once the player has focus.
+                                container.addEventListener('keydown', function(event) {
+                                    const key = event.key.toLowerCase();
+                                    if ([' ', 'k', 'f', 'm', 'arrowleft', 'arrowright'].includes(key)) event.preventDefault();
+
+                                    if (key === ' ' || key === 'k') togglePlay();
+                                    else if (key === 'f') toggleFullscreen();
+                                    else if (key === 'm') el('mute').click();
+                                    else if (key === 'arrowleft') skip(-10);
+                                    else if (key === 'arrowright') skip(10);
+                                    wake(true);
+                                });
+
+                                // Registered last: a <video> that already has metadata fires this at once.
+                                media.on('ready', function() {
+                                    const duration = media.getDuration();
+                                    if (startSec === null) startSec = 0;
+                                    if (endSec === null || (duration && endSec > duration)) endSec = duration;
+                                    ready = true;
+
+                                    if (startSec > 0) media.setTime(startSec);
+                                    showMuted();
+                                    updateDisplay();
+                                });
+
+                                showMuted();
+                                showFullscreen();
+                            };
+                        </script>
+                    @endonce
+
                     <script>
                         (function() {
                             const container = document.getElementById('video-container-{{ $uid }}');
-                            const video = document.getElementById('course-video-{{ $uid }}');
-                            if (!container || !video || container.dataset.playerReady) return;
+                            if (!container || container.dataset.playerReady) return;
                             container.dataset.playerReady = '1';
-
-                            const el = role => container.querySelector('[data-role="' + role + '"]');
-                            const seekBar = el('seek');
-                            const timeDisplay = el('time');
-                            const iconPlay = el('icon-play');
-                            const iconPause = el('icon-pause');
-                            const iconVolume = el('icon-volume');
-                            const iconMuted = el('icon-muted');
-                            const iconExpand = el('icon-expand');
-                            const iconCollapse = el('icon-collapse');
-                            const volumeSlider = el('volume');
-                            const speedBtn = el('speed');
-                            const pipBtn = el('pip');
 
                             // The content can be clipped to a section of the source video.
                             let startSec = {{ $startSeconds ?? 'null' }};
                             let endSec = {{ $endSeconds ?? 'null' }};
 
-                            const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
-                            let idleTimer = null;
+                            @if($youtubeId)
+                                const media = window.coursePlayerYoutubeMedia('yt-player-{{ $uid }}', @js($youtubeId), startSec, endSec, container.querySelector('[data-role="shield"]'));
+                            @else
+                                const media = window.coursePlayerVideoMedia(document.getElementById('course-video-{{ $uid }}'));
+                            @endif
 
-                            function formatTime(seconds) {
-                                if (isNaN(seconds)) return "00:00";
-                                const m = Math.floor(seconds / 60);
-                                const s = Math.floor(seconds % 60);
-                                return (m < 10 ? "0" + m : m) + ":" + (s < 10 ? "0" + s : s);
-                            }
-
-                            function showPlaying(playing) {
-                                iconPlay.style.display = playing ? 'none' : 'block';
-                                iconPause.style.display = playing ? 'block' : 'none';
-                                el('play').setAttribute('aria-label', playing ? 'Pause' : 'Play');
-                                if (!playing) wake(false);
-                            }
-
-                            function updateDisplay() {
-                                if (startSec === null) return;
-                                const currentRel = Math.max(0, video.currentTime - startSec);
-                                const durationRel = Math.max(0, endSec - startSec);
-
-                                seekBar.max = durationRel;
-                                seekBar.value = currentRel;
-                                timeDisplay.textContent = formatTime(currentRel) + " / " + formatTime(durationRel);
-                            }
-
-                            video.addEventListener('loadedmetadata', function() {
-                                if (startSec === null) startSec = 0;
-                                if (endSec === null || endSec > video.duration) endSec = video.duration;
-
-                                video.currentTime = startSec;
-                                updateDisplay();
-                            });
-
-                            function togglePlay() {
-                                if (video.paused) {
-                                    if (video.currentTime >= endSec) video.currentTime = startSec;
-                                    video.play();
-                                } else {
-                                    video.pause();
-                                }
-                            }
-
-                            function skip(seconds) {
-                                const target = video.currentTime + seconds;
-                                video.currentTime = Math.min(Math.max(target, startSec ?? 0), endSec ?? video.duration);
-                                updateDisplay();
-                            }
-
-                            video.addEventListener('play', () => showPlaying(true));
-                            video.addEventListener('pause', () => showPlaying(false));
-                            video.addEventListener('ended', () => showPlaying(false));
-
-                            el('play').addEventListener('click', togglePlay);
-                            video.addEventListener('click', togglePlay);
-                            video.addEventListener('dblclick', toggleFullscreen);
-                            el('back').addEventListener('click', () => skip(-10));
-                            el('forward').addEventListener('click', () => skip(10));
-
-                            video.addEventListener('timeupdate', function() {
-                                if (startSec !== null && video.currentTime < startSec) {
-                                    video.currentTime = startSec;
-                                }
-                                if (endSec !== null && video.currentTime >= endSec) {
-                                    video.pause();
-                                    video.currentTime = endSec;
-                                }
-                                updateDisplay();
-                            });
-
-                            seekBar.addEventListener('input', function() {
-                                video.currentTime = (startSec ?? 0) + parseFloat(seekBar.value);
-                            });
-
-                            // Volume
-                            function showMuted() {
-                                const muted = video.muted || video.volume === 0;
-                                iconVolume.style.display = muted ? 'none' : 'block';
-                                iconMuted.style.display = muted ? 'block' : 'none';
-                                el('mute').setAttribute('aria-label', muted ? 'Unmute' : 'Mute');
-                            }
-                            el('mute').addEventListener('click', function() {
-                                video.muted = !video.muted;
-                                if (!video.muted && video.volume === 0) video.volume = 1;
-                                volumeSlider.value = video.muted ? 0 : video.volume;
-                                showMuted();
-                            });
-                            volumeSlider.addEventListener('input', function() {
-                                video.volume = parseFloat(volumeSlider.value);
-                                video.muted = video.volume === 0;
-                                showMuted();
-                            });
-
-                            // Playback speed
-                            speedBtn.addEventListener('click', function() {
-                                const next = SPEEDS[(SPEEDS.indexOf(video.playbackRate) + 1) % SPEEDS.length];
-                                video.playbackRate = next;
-                                speedBtn.textContent = next + 'x';
-                            });
-
-                            // Picture in picture, where the browser supports it
-                            if (document.pictureInPictureEnabled && !video.disablePictureInPicture) {
-                                pipBtn.style.display = 'flex';
-                                pipBtn.addEventListener('click', function() {
-                                    if (document.pictureInPictureElement) {
-                                        document.exitPictureInPicture();
-                                    } else {
-                                        video.requestPictureInPicture().catch(() => {});
-                                    }
-                                });
-                            }
-
-                            // Fullscreen
-                            function fullscreenElement() {
-                                return document.fullscreenElement || document.webkitFullscreenElement || null;
-                            }
-                            function toggleFullscreen() {
-                                if (fullscreenElement()) {
-                                    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-                                } else if (container.requestFullscreen) {
-                                    container.requestFullscreen().catch(() => {});
-                                } else if (container.webkitRequestFullscreen) {
-                                    container.webkitRequestFullscreen();
-                                } else if (video.webkitEnterFullscreen) {
-                                    // iOS Safari only goes fullscreen through its own player.
-                                    video.webkitEnterFullscreen();
-                                }
-                            }
-                            function showFullscreen() {
-                                const isFull = fullscreenElement() === container;
-                                iconExpand.style.display = isFull ? 'none' : 'block';
-                                iconCollapse.style.display = isFull ? 'block' : 'none';
-                                el('fullscreen').setAttribute('aria-label', isFull ? 'Exit fullscreen' : 'Fullscreen');
-                            }
-                            el('fullscreen').addEventListener('click', toggleFullscreen);
-                            document.addEventListener('fullscreenchange', showFullscreen);
-                            document.addEventListener('webkitfullscreenchange', showFullscreen);
-
-                            // Hide the controls while playing and untouched, so the video is unobstructed.
-                            function wake(scheduleHide) {
-                                container.classList.remove('is-idle');
-                                clearTimeout(idleTimer);
-                                if (scheduleHide !== false && !video.paused) {
-                                    idleTimer = setTimeout(() => container.classList.add('is-idle'), 2500);
-                                }
-                            }
-                            container.addEventListener('mousemove', () => wake(true));
-                            container.addEventListener('mouseleave', () => { if (!video.paused) container.classList.add('is-idle') });
-                            container.addEventListener('touchstart', () => wake(true), { passive: true });
-
-                            // Keyboard shortcuts once the player has focus.
-                            container.addEventListener('keydown', function(event) {
-                                const key = event.key.toLowerCase();
-                                if ([' ', 'k', 'f', 'm', 'arrowleft', 'arrowright'].includes(key)) event.preventDefault();
-
-                                if (key === ' ' || key === 'k') togglePlay();
-                                else if (key === 'f') toggleFullscreen();
-                                else if (key === 'm') el('mute').click();
-                                else if (key === 'arrowleft') skip(-10);
-                                else if (key === 'arrowright') skip(10);
-                                wake(true);
-                            });
-
-                            showMuted();
-                            showFullscreen();
-                            updateDisplay();
+                            window.initCoursePlayer(container, media, startSec, endSec);
                         })();
                     </script>
-                @endif
             @elseif($type === 'LinkContent')
                 <div style="padding: 30px; background: #F9FAFB; border-radius: 8px; border: 1px solid #E5E7EB; text-align: center;">
                     <div style="margin-bottom: 20px;">

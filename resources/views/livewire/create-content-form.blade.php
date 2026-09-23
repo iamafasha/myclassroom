@@ -388,12 +388,10 @@ new #[Layout('layouts.app')] class extends Component
                     'videoEndTime' => 'nullable|string',
                 ]);
 
-                // Save against the link and let the copy download in the background:
-                // fetching it here held the request open until PHP timed out.
+                // Played straight from the link (YouTube or a direct file): never copied to this server.
                 $fileUrl = $this->videoExternalUrl;
                 $startTime = $this->videoStartTime;
                 $endTime = $this->videoEndTime;
-                $downloadFromUrl = true;
             }
 
             $contentable = $existingContentable ?: new VideoContent();
@@ -402,10 +400,6 @@ new #[Layout('layouts.app')] class extends Component
             $contentable->start_time = $startTime;
             $contentable->end_time = $endTime;
             $contentable->save();
-
-            if (! empty($downloadFromUrl)) {
-                \App\Jobs\DownloadVideoContent::dispatch($contentable->id, $fileUrl, $startTime ?: null, $endTime ?: null);
-            }
         } elseif ($this->type === 'link') {
             $this->validate([
                 'linkUrl' => 'required|url',

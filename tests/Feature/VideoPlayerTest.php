@@ -51,7 +51,7 @@ it('runs media edge to edge on a phone without breaking fullscreen', function ()
         // The bleed must not follow the player into fullscreen.
         ->assertSee('.content-read .cs-bleed:fullscreen { margin: 0; }', false)
         // The desktop width cap is what kept the frame narrow on a phone.
-        ->assertSee('.video-frame { max-width: none; }', false);
+        ->assertSee('.video-player.is-youtube { max-width: none; }', false);
 });
 
 it('offers the full control set on the uploaded player', function () {
@@ -76,15 +76,28 @@ it('keeps the clip window when the content limits start and end times', function
         ->assertSee('let endSec = 75;', false);
 });
 
-it('renders a youtube video in a fullscreen capable frame', function () {
-    ['owner' => $owner, 'moduleContent' => $moduleContent] = seedVideoLesson('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+it('plays a youtube video from youtube in the custom player', function () {
+    ['owner' => $owner, 'moduleContent' => $moduleContent] = seedVideoLesson('https://www.youtube.com/watch?v=dQw4w9WgXcQ', [
+        'start_time' => '00:00:30',
+        'end_time' => '00:01:15',
+    ]);
 
-    $this->actingAs($owner)->get(route('content.show', $moduleContent->id))
-        ->assertOk()
-        ->assertSee('class="video-frame cs-bleed"', false)
-        ->assertSee("'fs': 1", false)
-        ->assertSee('allowfullscreen', false)
-        // The uploaded-file player and its controls have no place here. Keyed on the
-        // control markup rather than the class, which the stylesheet also mentions.
-        ->assertDontSee('data-role="fullscreen"', false);
+    $response = $this->actingAs($owner)->get(route('content.show', $moduleContent->id))->assertOk();
+
+    // Streams through YouTube's iframe API with its own chrome turned off...
+    $response->assertSee('class="video-player cs-bleed is-youtube"', false)
+        ->assertSee('https://www.youtube.com/iframe_api', false)
+        ->assertSee("'controls': 0", false)
+        ->assertSee('coursePlayerYoutubeMedia(', false)
+        ->assertSee('dQw4w9WgXcQ', false)
+        // ...keeps the clip window...
+        ->assertSee('let startSec = 30;', false)
+        ->assertSee('let endSec = 75;', false)
+        // ...and never falls back to a server copy.
+        ->assertDontSee('<video id="course-video-', false);
+
+    // Same control set as an uploaded video.
+    foreach (['play', 'seek', 'mute', 'volume', 'back', 'forward', 'time', 'speed', 'fullscreen'] as $control) {
+        $response->assertSee('data-role="' . $control . '"', false);
+    }
 });
