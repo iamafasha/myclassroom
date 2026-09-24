@@ -76,7 +76,9 @@ it('deletes a single block without touching the rest of the content', function (
     Livewire::actingAs($owner)->test('content-show', ['moduleContent' => $moduleContent->id])
         ->call('deleteContentItem', $extra->id)
         ->assertSee('reading material')
-        ->assertDontSee('second block');
+        ->assertDontSee('second block')
+        ->assertSee('Block deleted.')
+        ->call('purgeRemovedItems', $extra->id);
 
     expect(Content::find($extra->id))->toBeNull()
         ->and(NoteContent::find($extraNote->id))->toBeNull()
@@ -132,4 +134,45 @@ it('does not let a student delete content', function () {
         ->assertForbidden();
 
     expect(ModuleContent::find($moduleContent->id))->not->toBeNull();
+});
+
+it('brings a deleted block back, answers and all, when the owner undoes it', function () {
+    [
+        'owner' => $owner, 'moduleContent' => $moduleContent, 'content' => $content,
+        'note' => $note, 'pivot' => $pivot, 'answer' => $answer,
+    ] = seedDeletableContent();
+
+    Livewire::actingAs($owner)->test('content-show', ['moduleContent' => $moduleContent->id])
+        ->call('deleteContentItem', $content->id)
+        ->assertDontSee('reading material')
+        ->call('undoDeleteContentItem')
+        ->assertSee('reading material')
+        ->assertDontSee('Block deleted.');
+
+    expect(Content::find($content->id))->not->toBeNull()
+        ->and(NoteContent::find($note->id))->not->toBeNull()
+        ->and(ContentModuleContent::find($pivot->id)->removed_at)->toBeNull()
+        ->and(ContentExerciseAnswer::find($answer->id))->not->toBeNull()
+        ->and($moduleContent->fresh()->contents)->toHaveCount(1);
+});
+
+it('ignores the undo notice of an older removal', function () {
+    ['owner' => $owner, 'moduleContent' => $moduleContent, 'content' => $content] = seedDeletableContent();
+
+    Livewire::actingAs($owner)->test('content-show', ['moduleContent' => $moduleContent->id])
+        ->call('deleteContentItem', $content->id)
+        ->call('purgeRemovedItems', $content->id + 1000);
+
+    expect(Content::find($content->id))->not->toBeNull();
+});
+
+it('finishes off a removal nobody undid on the next visit', function () {
+    ['owner' => $owner, 'moduleContent' => $moduleContent, 'content' => $content, 'pivot' => $pivot] = seedDeletableContent();
+
+    $pivot->update(['removed_at' => now()->subMinutes(5)]);
+
+    Livewire::actingAs($owner)->test('content-show', ['moduleContent' => $moduleContent->id]);
+
+    expect(Content::find($content->id))->toBeNull()
+        ->and(ContentModuleContent::find($pivot->id))->toBeNull();
 });

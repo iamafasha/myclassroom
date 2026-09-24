@@ -18,6 +18,17 @@ new #[Layout('layouts.app')] class extends Component
 
     public array $submissionFiles = [];
 
+    /** The block whose form is open inline on this page, if any. */
+    public $editingContentId = null;
+
+    /** The block just removed, kept restorable until the undo notice goes away. */
+    public $removedContentId = null;
+
+    /** A new block being filled in on the page: its type, and the block it goes after ('end' for last). */
+    public $addingType = null;
+
+    public $addingAfter = null;
+
     public function mount($moduleContent)
     {
         $this->moduleContent = \App\Models\ModuleContent::findOrFail($moduleContent);
@@ -28,6 +39,9 @@ new #[Layout('layouts.app')] class extends Component
             403,
             'This content belongs to a course you do not have access to.'
         );
+
+        // Removals nobody undid in time are finished off on the next visit.
+        $this->moduleContent->purgeRemovedBlocks(60);
 
         foreach ($this->moduleContent->contents as $content) {
             if (!$content->pivot->is_exercise) {
@@ -43,6 +57,7 @@ new #[Layout('layouts.app')] class extends Component
     {
         $pivot = \App\Models\ContentModuleContent::where('module_content_id', $this->moduleContent->id)
             ->whereKey($pivotId)
+            ->whereNull('removed_at')
             ->firstOrFail();
 
         $this->validate([
@@ -267,23 +282,167 @@ new #[Layout('layouts.app')] class extends Component
 
     /**
      * Removes a single block from this content, leaving the content and its other blocks
-     * in place. Deleting the last block leaves an empty content to add to again.
+     * in place. The block is only hidden at first so the owner can undo; it is purged when
+     * the undo notice closes, when another block is removed, or on the next visit.
      */
     public function deleteContentItem($contentId)
     {
         $this->authorizeManage();
 
-        $content = $this->moduleContent->contents()->whereKey($contentId)->first();
+        $pivot = \App\Models\ContentModuleContent::where('module_content_id', $this->moduleContent->id)
+            ->where('content_id', $contentId)
+            ->whereNull('removed_at')
+            ->first();
 
-        if (! $content) {
+        if (! $pivot) {
             return;
         }
 
-        $this->moduleContent->contents()->detach($content->id);
-        $content->contentable?->delete();
-        $content->delete();
+        $this->moduleContent->purgeRemovedBlocks();
+
+        $pivot->removed_at = now();
+        $pivot->save();
+
+        $this->removedContentId = (int) $contentId;
+        if ((int) $this->editingContentId === (int) $contentId) {
+            $this->editingContentId = null;
+        }
 
         $this->moduleContent->load('contents');
+    }
+
+    public function undoDeleteContentItem()
+    {
+        $this->authorizeManage();
+
+        if ($this->removedContentId) {
+            \App\Models\ContentModuleContent::where('module_content_id', $this->moduleContent->id)
+                ->where('content_id', $this->removedContentId)
+                ->whereNotNull('removed_at')
+                ->update(['removed_at' => null]);
+        }
+
+        $this->removedContentId = null;
+        $this->moduleContent->load('contents');
+    }
+
+    /** The undo notice closed: the removal is final. A notice for an older removal is ignored. */
+    public function purgeRemovedItems($contentId = null)
+    {
+        $this->authorizeManage();
+
+        if ($contentId !== null && (int) $contentId !== (int) $this->removedContentId) {
+            return;
+        }
+
+        $this->moduleContent->purgeRemovedBlocks();
+        $this->removedContentId = null;
+    }
+
+    /** Drag-and-drop reordering sends the whole new order at once. */
+    public function reorderContentItems($contentIds)
+    {
+        $this->authorizeManage();
+
+        $this->moduleContent->reorderBlocks((array) $contentIds);
+        $this->moduleContent->load('contents');
+    }
+
+    /**
+     * Adds a block from a pasted link or text: the type is picked from what was pasted.
+     * `$afterContentId` places it after that block; null adds it at the end.
+     */
+    public function addFromPaste($text, $afterContentId = null)
+    {
+        $this->authorizeManage();
+
+        $text = trim((string) $text);
+
+        if ($text === '') {
+            return;
+        }
+
+        if (preg_match('~^https?://\S+$~i', $text)) {
+            // Returned rather than thrown, so the inserter that sent it shows the message.
+            if (strlen($text) > 255 || filter_var($text, FILTER_VALIDATE_URL) === false) {
+                return strlen($text) > 255 ? 'That link is too long to save.' : 'That link doesn\'t look valid.';
+            }
+
+            $contentable = \App\Support\QuickBlock::fromUrl($text);
+            $label = $contentable->name ?? null;
+        } else {
+            $contentable = \App\Support\QuickBlock::fromText($text);
+            $label = null;
+        }
+
+        $content = \App\Support\QuickBlock::attach($this->moduleContent, $contentable, $afterContentId, $label);
+        $this->moduleContent->refresh()->load('contents');
+        $this->dispatch('block-added', contentId: $content->id);
+
+        return null;
+    }
+
+    /** Adds a block from a file the owner just uploaded (dropped or picked). */
+    public function addFromFile($fileId, $afterContentId = null)
+    {
+        $this->authorizeManage();
+
+        $file = \App\Models\File::ownedBy(auth()->user())->findOrFail($fileId);
+
+        $contentable = \App\Support\QuickBlock::fromFile($file);
+        $content = \App\Support\QuickBlock::attach($this->moduleContent, $contentable, $afterContentId, \App\Support\QuickBlock::labelForFile($file));
+        $this->moduleContent->refresh()->load('contents');
+        $this->dispatch('block-added', contentId: $content->id);
+    }
+
+    /** Title and start date save straight from the page, on phones as well as desktop. */
+    public function saveDetails($label, $studyAt)
+    {
+        $this->authorizeManage();
+
+        $validated = \Illuminate\Support\Facades\Validator::make(
+            ['label' => trim((string) $label), 'studyAt' => $studyAt ?: null],
+            ['label' => 'required|string|max:255', 'studyAt' => 'nullable|date'],
+            ['label.required' => 'The title can\'t be empty.']
+        )->validate();
+
+        $this->moduleContent->label = $validated['label'];
+        $this->moduleContent->study_at = $validated['studyAt'];
+        $this->moduleContent->save();
+
+        return true;
+    }
+
+    public function editContentItem($contentId)
+    {
+        $this->authorizeManage();
+
+        $this->editingContentId = $this->moduleContent->contents->contains('id', $contentId) ? (int) $contentId : null;
+        $this->addingType = null;
+        $this->addingAfter = null;
+    }
+
+    /** Opens the form for a new block of `$type` where it will appear, after `$afterContentId` or at the end. */
+    public function startAdding($type, $afterContentId = null)
+    {
+        $this->authorizeManage();
+
+        if (! in_array($type, ['note', 'pdf', 'video', 'image', 'link', 'quiz', 'live', 'session'], true)) {
+            return;
+        }
+
+        $this->addingType = $type;
+        $this->addingAfter = $afterContentId ? (int) $afterContentId : 'end';
+        $this->editingContentId = null;
+    }
+
+    #[\Livewire\Attributes\On('content-editor-closed')]
+    public function closeEditor()
+    {
+        $this->editingContentId = null;
+        $this->addingType = null;
+        $this->addingAfter = null;
+        $this->moduleContent->refresh()->load('contents');
     }
 
     public function moveContentItemUp($contentId)
@@ -335,6 +494,39 @@ new #[Layout('layouts.app')] class extends Component
             margin: 0 auto;
             border-radius: 8px;
         }
+
+        .content-read .cs-block + .cs-block { margin-top: 30px; padding-top: 30px; border-top: 1px solid #E5E7EB; }
+        /* The "+" inserter takes the place of the divider between blocks. */
+        .content-read .cs-block:has(> .bi-between) + .cs-block { margin-top: 0; }
+        .content-read .cs-block > .bi-between { margin: 18px 0 -12px; }
+        .content-read .cs-block--dragging { opacity: .4; }
+        .content-read .cs-drag-handle {
+            width: 24px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
+            border: 0; border-radius: 6px; background: transparent; color: #9CA3AF; cursor: grab; padding: 0;
+        }
+        .content-read .cs-drag-handle:hover, .content-read .cs-drag-handle:focus-visible { background: #F3F4F6; color: #374151; }
+        .content-read .cs-drag-handle:active { cursor: grabbing; }
+        .content-read .cs-editable { cursor: text; border-radius: 6px; margin: -6px; padding: 6px; transition: background .15s ease; }
+        .content-read .cs-editable:hover { background: #F9FAFB; box-shadow: inset 0 0 0 1px #E5E7EB; }
+        /* A class, not an inline style: x-show clears an inline display when it shows the row. */
+        .content-read .cs-title-row { display: flex; align-items: flex-start; gap: 8px; }
+        .content-read .cs-title-edit {
+            margin-top: 6px; width: 30px; height: 30px; flex-shrink: 0; border-radius: 6px; border: 1px solid transparent;
+            background: transparent; color: #9CA3AF; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+        }
+        .content-read .cs-title-edit:hover { border-color: #E5E7EB; background: #F9FAFB; color: #4F46E5; }
+        .content-read .cs-details { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin-top: 4px; }
+        .content-read .cs-details-field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 180px; font-size: 12px; font-weight: 600; color: #374151; }
+        .content-read .cs-details-field em { font-style: normal; font-weight: 400; color: #6B7280; }
+        .content-read .cs-details-field input { font: inherit; font-size: 16px; font-weight: 500; padding: 8px 10px; border: 1px solid #D1D5DB; border-radius: 6px; outline: none; }
+        .content-read .cs-details-field input:focus { border-color: #6366F1; box-shadow: 0 0 0 3px rgba(99, 102, 241, .15); }
+        .cs-undo {
+            position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 60;
+            display: flex; align-items: center; gap: 14px;
+            background: #111827; color: #F9FAFB; padding: 10px 14px 10px 18px; border-radius: 10px;
+            box-shadow: 0 10px 25px -5px rgba(0,0,0,.3); font-size: 14px;
+        }
+        .cs-undo button { background: transparent; border: 0; color: #A5B4FC; font: inherit; font-weight: 700; cursor: pointer; padding: 2px 4px; }
 
         /* Reading view: tighten the owner controls and the completion footer so
            they stay usable on a phone instead of eating half the screen. */
@@ -397,6 +589,69 @@ new #[Layout('layouts.app')] class extends Component
             }
         }
     </style>
+    {{-- Loaded up front for owners too, since a PDF they drop in arrives in a Livewire update,
+         where a script tag in the new markup would never run. --}}
+    @if($this->canManage || $moduleContent->contents->contains(fn ($content) => $content->contentable instanceof \App\Models\PdfNotesContent))
+        <x-pdf-viewer-engine />
+        <script>
+        window.mountPdfBlock = function (uid, cfg) {
+            const toolbarEl = document.getElementById('pdf-toolbar-' + uid);
+            const toggleEl = document.getElementById('pdf-toolbar-toggle-' + uid);
+            const wrapperEl = document.getElementById('pdf-wrapper-' + uid);
+
+            const viewer = window.createPdfViewer({
+                wrapper: wrapperEl,
+                sizer: document.getElementById('pdf-sizer-' + uid),
+                container: document.getElementById('pdf-container-' + uid),
+                toolbar: toolbarEl,
+                levelEl: document.getElementById('zoom-level-' + uid),
+                pageNoEl: document.getElementById('pdf-pageno-' + uid)
+            });
+
+            pdfjsLib.getDocument(cfg.url).promise.then(function(pdf) {
+                return viewer.setDocument(pdf, {
+                    startPage: cfg.startPage,
+                    endPage: cfg.endPage,
+                    startPercent: cfg.startPercent,
+                    endPercent: cfg.endPercent
+                });
+            }).catch(function(err) {
+                viewer.message('<p class="pdfv-status">Failed to load PDF.<\/p>');
+                console.error(err);
+            });
+
+            document.getElementById('zoom-in-' + uid).addEventListener('click', function() {
+                viewer.zoomBy(1.25);
+            });
+
+            document.getElementById('zoom-out-' + uid).addEventListener('click', function() {
+                viewer.zoomBy(1 / 1.25);
+            });
+
+            document.getElementById('zoom-fit-' + uid).addEventListener('click', function() {
+                viewer.fitWidth();
+            });
+
+            // On narrow screens the toolbar stays out of the way behind this toggle
+            // until it's actually needed, so the page gets the full screen width.
+            function openToolbar() {
+                toolbarEl.classList.add('pdfv-open');
+                toggleEl.classList.add('pdfv-hidden');
+            }
+            function closeToolbar() {
+                toolbarEl.classList.remove('pdfv-open');
+                toggleEl.classList.remove('pdfv-hidden');
+            }
+            toggleEl.addEventListener('click', openToolbar);
+            document.getElementById('pdf-toolbar-close-' + uid).addEventListener('click', closeToolbar);
+            // Tapping the page itself dismisses an open toolbar.
+            wrapperEl.addEventListener('click', function() {
+                if (toolbarEl.classList.contains('pdfv-open')) closeToolbar();
+            });
+        };
+        </script>
+    @endif
+
     <div class="content-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
         <div>
             @php
@@ -405,8 +660,22 @@ new #[Layout('layouts.app')] class extends Component
                 $backUrl = ($course && $module) ? route('course.module.show', ['courseId' => $course->id, 'moduleId' => $module->id]) : route('home');
             @endphp
             <a href="{{ $backUrl }}" wire:navigate style="color: #4F46E5; text-decoration: none; font-weight: 500; display: inline-block; margin-bottom: 15px;">&larr; Back to Dashboard</a>
-            <h1 class="content-title" style="{{ $moduleContent->isCompletedFor(auth()->user()) ? 'text-decoration: line-through; color: #6B7280;' : '' }}">{{ $moduleContent->label ?? 'Content' }}</h1>
+            @if($module?->title)
+                <div class="content-module-title" style="font-size: 0.8125rem; font-weight: 600; color: #6B7280; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px;">{{ $module->title }}</div>
+            @endif
+            <div x-data="{ editingDetails: false }">
+            <div x-show="!editingDetails" class="cs-title-row">
+                <h1 class="content-title" style="{{ $moduleContent->isCompletedFor(auth()->user()) ? 'text-decoration: line-through; color: #6B7280;' : '' }}">{{ $moduleContent->label ?? 'Content' }}</h1>
+                @if($this->canManage)
+                    <button type="button" class="cs-title-edit" x-on:click="editingDetails = true" title="Edit title and start date" aria-label="Edit title and start date">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536M9 13l6.232-6.232a2.5 2.5 0 113.536 3.536L12.536 16.536 9 17l.464-3.536z" />
+                        </svg>
+                    </button>
+                @endif
+            </div>
             @if($moduleContent->study_at)
+                <div x-show="!editingDetails">
                 <div style="margin-top: 8px; font-size: 0.8125rem; color: #4338CA; background: #EEF2FF; border: 1px solid #C7D2FE; border-radius: 9999px; padding: 3px 10px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;"
                      title="Planned start date">
                     <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -414,7 +683,46 @@ new #[Layout('layouts.app')] class extends Component
                     </svg>
                     Start {{ $moduleContent->study_at->format('D, j M Y') }}
                 </div>
+                </div>
             @endif
+
+            @if($this->canManage)
+                {{-- Saves as each field changes; Done just closes. Works on phones too, where the rest of the owner toolbar is hidden. --}}
+                <div x-show="editingDetails" x-cloak class="cs-details"
+                     x-data="{
+                        label: @js($moduleContent->label ?? ''),
+                        studyAt: @js($moduleContent->study_at?->format('Y-m-d') ?? ''),
+                        status: '',
+                        save() {
+                            this.status = 'saving';
+                            return $wire.saveDetails(this.label, this.studyAt).then(ok => {
+                                this.status = ok ? 'saved' : 'error';
+                                return ok;
+                            });
+                        },
+                        done() {
+                            this.save().then(ok => { if (ok) { editingDetails = false; this.status = ''; } });
+                        },
+                     }">
+                    <label class="cs-details-field">
+                        <span>Title</span>
+                        <input type="text" x-model="label" x-on:change="save()" x-on:keydown.enter.prevent="done()" maxlength="255">
+                    </label>
+                    <label class="cs-details-field" style="max-width: 200px;">
+                        <span>Start date <em>(optional)</em></span>
+                        <input type="date" x-model="studyAt" x-on:change="save()">
+                    </label>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <button type="button" x-on:click="done()" style="background: #4F46E5; color: #fff; border: 0; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer;">Done</button>
+                        <span style="font-size: 12px;"
+                              :style="status === 'error' ? 'color: #B91C1C' : 'color: #047857'"
+                              x-text="{ saving: 'Saving…', saved: 'Saved', error: 'Not saved' }[status] || ''"></span>
+                    </div>
+                    @error('label') <span style="color: #B91C1C; font-size: 12px; flex-basis: 100%;">{{ $message }}</span> @enderror
+                    @error('studyAt') <span style="color: #B91C1C; font-size: 12px; flex-basis: 100%;">{{ $message }}</span> @enderror
+                </div>
+            @endif
+            </div>
         </div>
 
         @if($this->canManage)
@@ -436,14 +744,14 @@ new #[Layout('layouts.app')] class extends Component
                 </svg>
             </button>
             <div x-show="open" @click.outside="open = false" x-transition style="display: none; position: absolute; right: 0; margin-top: 0.5rem; width: 12rem; background-color: white; border-radius: 0.375rem; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); border: 1px solid #E5E7EB; z-index: 50;">
-                <a href="/content/{{ $moduleContent->id }}/add?type=note" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">Text Note</a>
-                <a href="/content/{{ $moduleContent->id }}/add?type=pdf" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">PDF Document</a>
-                <a href="/content/{{ $moduleContent->id }}/add?type=image" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">Image Content</a>
-                <a href="/content/{{ $moduleContent->id }}/add?type=video" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">Video Content</a>
-                <a href="/content/{{ $moduleContent->id }}/add?type=link" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">External Link</a>
-                <a href="/content/{{ $moduleContent->id }}/add?type=quiz" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">Interactive Quiz</a>
-                <a href="/content/{{ $moduleContent->id }}/add?type=live" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6;">Live Class</a>
-                <a href="/content/{{ $moduleContent->id }}/add?type=session" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none;">Mentor Session</a>
+                <button type="button" x-on:click="open = false" wire:click="startAdding('note')" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6; width: 100%; text-align: left; background: white; border-left: 0; border-right: 0; border-top: 0; cursor: pointer;">Text Note</button>
+                <button type="button" x-on:click="open = false" wire:click="startAdding('pdf')" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6; width: 100%; text-align: left; background: white; border-left: 0; border-right: 0; border-top: 0; cursor: pointer;">PDF Document</button>
+                <button type="button" x-on:click="open = false" wire:click="startAdding('image')" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6; width: 100%; text-align: left; background: white; border-left: 0; border-right: 0; border-top: 0; cursor: pointer;">Image Content</button>
+                <button type="button" x-on:click="open = false" wire:click="startAdding('video')" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6; width: 100%; text-align: left; background: white; border-left: 0; border-right: 0; border-top: 0; cursor: pointer;">Video Content</button>
+                <button type="button" x-on:click="open = false" wire:click="startAdding('link')" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6; width: 100%; text-align: left; background: white; border-left: 0; border-right: 0; border-top: 0; cursor: pointer;">External Link</button>
+                <button type="button" x-on:click="open = false" wire:click="startAdding('quiz')" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6; width: 100%; text-align: left; background: white; border-left: 0; border-right: 0; border-top: 0; cursor: pointer;">Interactive Quiz</button>
+                <button type="button" x-on:click="open = false" wire:click="startAdding('live')" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; border-bottom: 1px solid #F3F4F6; width: 100%; text-align: left; background: white; border-left: 0; border-right: 0; border-top: 0; cursor: pointer;">Live Class</button>
+                <button type="button" x-on:click="open = false" wire:click="startAdding('session')" style="display: block; padding: 0.75rem 1rem; font-size: 0.875rem; color: #374151; text-decoration: none; width: 100%; text-align: left; background: white; border-left: 0; border-right: 0; border-top: 0; cursor: pointer; border-bottom: 0;">Mentor Session</button>
             </div>
         </div>
         </div>
@@ -487,32 +795,89 @@ new #[Layout('layouts.app')] class extends Component
             ];
         @endphp
 
+        <div class="cs-blocks"
+             @if($this->canManage)
+             x-data="{
+                dragging: null,
+                before: [],
+                order() {
+                    return [...this.$el.querySelectorAll(':scope > [data-block-id]')].map(el => Number(el.dataset.blockId));
+                },
+                start(event) {
+                    this.dragging = event.target.closest('[data-block-id]');
+                    this.before = this.order();
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('application/x-block', this.dragging.dataset.blockId);
+                    event.dataTransfer.setDragImage(this.dragging, 24, 24);
+                    requestAnimationFrame(() => this.dragging && this.dragging.classList.add('cs-block--dragging'));
+                },
+                over(event) {
+                    if (!this.dragging) return;
+                    event.preventDefault();
+                    const target = event.target.closest('[data-block-id]');
+                    if (!target || target === this.dragging || target.parentElement !== this.$el) return;
+                    const rect = target.getBoundingClientRect();
+                    const below = event.clientY > rect.top + rect.height / 2;
+                    this.$el.insertBefore(this.dragging, below ? target.nextElementSibling : target);
+                },
+                end() {
+                    if (!this.dragging) return;
+                    this.dragging.classList.remove('cs-block--dragging');
+                    this.dragging = null;
+                    const order = this.order();
+                    if (order.join() !== this.before.join()) $wire.reorderContentItems(order);
+                },
+             }"
+             x-on:dragover="over($event)"
+             x-on:drop="if (dragging) $event.preventDefault()"
+             x-on:dragend="end()"
+             @endif
+        >
         @forelse($moduleContent->contents as $index => $singleContent)
             @php
                 $contentable = $singleContent->contentable;
                 $type = $contentable ? class_basename($contentable) : 'Unknown';
-                $uid = $moduleContent->id . '-' . $index;
+                // Keyed by block, not position, so ids stay put when blocks are reordered.
+                $uid = $moduleContent->id . '-' . $singleContent->id;
+                $isEditingBlock = $this->canManage && (int) $editingContentId === (int) $singleContent->id;
             @endphp
 
-            <div style="{{ !$loop->first ? 'margin-top: 30px; padding-top: 30px; border-top: 1px solid #E5E7EB;' : '' }}">
+            <div class="cs-block {{ $loop->first ? 'cs-block--first' : '' }}" data-block-id="{{ $singleContent->id }}" wire:key="block-{{ $singleContent->id }}">
 
             <div class="cs-item-bar" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                <span style="font-size: 0.75rem; font-weight: 700; color: #6B7280; text-transform: uppercase; letter-spacing: 0.05em;">{{ $contentTypeLabels[$type] ?? 'Content' }}</span>
-                @if($this->canManage)
+                <span style="display: inline-flex; align-items: center; gap: 8px;">
+                    @if($this->canManage)
+                        {{-- Drag to reorder; with the keyboard, focus it and use the arrow keys. --}}
+                        <button type="button" class="cs-drag-handle" draggable="true"
+                                x-on:dragstart="start($event)"
+                                x-on:keydown.arrow-up.prevent="$wire.moveContentItemUp({{ $singleContent->id }})"
+                                x-on:keydown.arrow-down.prevent="$wire.moveContentItemDown({{ $singleContent->id }})"
+                                title="Drag to reorder (or focus and use the arrow keys)" aria-label="Reorder this block">
+                            <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                <circle cx="7" cy="5" r="1.5"/><circle cx="13" cy="5" r="1.5"/>
+                                <circle cx="7" cy="10" r="1.5"/><circle cx="13" cy="10" r="1.5"/>
+                                <circle cx="7" cy="15" r="1.5"/><circle cx="13" cy="15" r="1.5"/>
+                            </svg>
+                        </button>
+                    @endif
+                    <span style="font-size: 0.75rem; font-weight: 700; color: #6B7280; text-transform: uppercase; letter-spacing: 0.05em;">{{ $contentTypeLabels[$type] ?? 'Content' }}</span>
+                </span>
+                @if($this->canManage && ! $isEditingBlock)
                 <div style="display: flex; align-items: center; gap: 6px;">
-                    <button wire:click="moveContentItemUp({{ $singleContent->id }})" @if($loop->first) disabled @endif title="Move up" style="width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; background: white; border: 1px solid #D1D5DB; border-radius: 6px; cursor: {{ $loop->first ? 'not-allowed' : 'pointer' }}; opacity: {{ $loop->first ? '0.4' : '1' }}; color: #374151;">&uarr;</button>
-                    <button wire:click="moveContentItemDown({{ $singleContent->id }})" @if($loop->last) disabled @endif title="Move down" style="width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; background: white; border: 1px solid #D1D5DB; border-radius: 6px; cursor: {{ $loop->last ? 'not-allowed' : 'pointer' }}; opacity: {{ $loop->last ? '0.4' : '1' }}; color: #374151;">&darr;</button>
-                    <a href="{{ route('content.edit', ['moduleContentId' => $moduleContent->id, 'contentId' => $singleContent->id]) }}" wire:navigate style="margin-left: 4px; padding: 6px 12px; background: white; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.8rem; font-weight: 600; color: #4F46E5; text-decoration: none;">Edit</a>
-                    <button wire:click="deleteContentItem({{ $singleContent->id }})"
-                            wire:confirm="Remove this {{ strtolower($contentTypeLabels[$type] ?? 'content') }} block? The rest of this content stays put."
-                            title="Delete this block"
+                    <button type="button" wire:click="editContentItem({{ $singleContent->id }})" style="padding: 6px 12px; background: white; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.8rem; font-weight: 600; color: #4F46E5; cursor: pointer;">Edit</button>
+                    <button type="button" wire:click="deleteContentItem({{ $singleContent->id }})"
+                            title="Delete this block (you can undo)"
                             style="padding: 6px 12px; background: #FEE2E2; border: 1px solid #FECACA; border-radius: 6px; font-size: 0.8rem; font-weight: 600; color: #B91C1C; cursor: pointer;">Delete</button>
                 </div>
                 @endif
             </div>
 
+            @if($isEditingBlock)
+                <livewire:create-content-form :moduleContentId="$moduleContent->id" :contentId="$singleContent->id" :inline="true" :key="'edit-block-' . $singleContent->id" />
+            @else
             @if($type === 'NoteContent')
-                <div style="line-height: 1.6; color: #374151;">
+                <div style="line-height: 1.6; color: #374151;"
+                     @if($this->canManage) class="cs-editable" wire:click="editContentItem({{ $singleContent->id }})" title="Click to edit" @endif>
                     {!! nl2br(e($contentable->content)) !!}
                 </div>
             @elseif($type === 'PdfNotesContent')
@@ -599,7 +964,10 @@ new #[Layout('layouts.app')] class extends Component
                     </style>
                 @endonce
 
-                <div class="pdfv-block cs-bleed" id="pdf-block-{{ $uid }}">
+                {{-- Livewire leaves the drawn pages alone on updates; Alpine starts the viewer,
+                     including for a PDF block that arrives in an update (a dropped file). --}}
+                <div class="pdfv-block cs-bleed" id="pdf-block-{{ $uid }}" wire:ignore
+                     x-data x-init="window.mountPdfBlock(@js($uid), @js(['url' => $pdfUrl, 'startPage' => $startPage, 'endPage' => $endPage === 'null' ? null : $endPage, 'startPercent' => (int) $startPercent, 'endPercent' => (int) $endPercent]))">
                     <div class="pdfv-toolbar" id="pdf-toolbar-{{ $uid }}">
                         <button type="button" class="pdfv-btn" id="zoom-out-{{ $uid }}" aria-label="Zoom out">&minus;</button>
                         <span class="pdfv-level" id="zoom-level-{{ $uid }}">100%</span>
@@ -626,63 +994,7 @@ new #[Layout('layouts.app')] class extends Component
                     </div>
                 </div>
 
-                <script>
-                    (function() {
-                        const toolbarEl = document.getElementById('pdf-toolbar-{{ $uid }}');
-                        const toggleEl = document.getElementById('pdf-toolbar-toggle-{{ $uid }}');
-                        const wrapperEl = document.getElementById('pdf-wrapper-{{ $uid }}');
 
-                        const viewer = window.createPdfViewer({
-                            wrapper: wrapperEl,
-                            sizer: document.getElementById('pdf-sizer-{{ $uid }}'),
-                            container: document.getElementById('pdf-container-{{ $uid }}'),
-                            toolbar: toolbarEl,
-                            levelEl: document.getElementById('zoom-level-{{ $uid }}'),
-                            pageNoEl: document.getElementById('pdf-pageno-{{ $uid }}')
-                        });
-
-                        pdfjsLib.getDocument(@json($pdfUrl)).promise.then(function(pdf) {
-                            return viewer.setDocument(pdf, {
-                                startPage: {{ $startPage }},
-                                endPage: {{ $endPage }},
-                                startPercent: {{ $startPercent }},
-                                endPercent: {{ $endPercent }}
-                            });
-                        }).catch(function(err) {
-                            viewer.message('<p class="pdfv-status">Failed to load PDF.</p>');
-                            console.error(err);
-                        });
-
-                        document.getElementById('zoom-in-{{ $uid }}').addEventListener('click', function() {
-                            viewer.zoomBy(1.25);
-                        });
-
-                        document.getElementById('zoom-out-{{ $uid }}').addEventListener('click', function() {
-                            viewer.zoomBy(1 / 1.25);
-                        });
-
-                        document.getElementById('zoom-fit-{{ $uid }}').addEventListener('click', function() {
-                            viewer.fitWidth();
-                        });
-
-                        // On narrow screens the toolbar stays out of the way behind this toggle
-                        // until it's actually needed, so the page gets the full screen width.
-                        function openToolbar() {
-                            toolbarEl.classList.add('pdfv-open');
-                            toggleEl.classList.add('pdfv-hidden');
-                        }
-                        function closeToolbar() {
-                            toolbarEl.classList.remove('pdfv-open');
-                            toggleEl.classList.remove('pdfv-hidden');
-                        }
-                        toggleEl.addEventListener('click', openToolbar);
-                        document.getElementById('pdf-toolbar-close-{{ $uid }}').addEventListener('click', closeToolbar);
-                        // Tapping the page itself dismisses an open toolbar.
-                        wrapperEl.addEventListener('click', function() {
-                            if (toolbarEl.classList.contains('pdfv-open')) closeToolbar();
-                        });
-                    })();
-                </script>
             @elseif($type === 'VideoContent')
 
                 @php
@@ -1442,12 +1754,48 @@ new #[Layout('layouts.app')] class extends Component
                     </form>
                 </div>
             @endif
+            @endif
+
+            @if($this->canManage)
+                @if($addingType && (string) $addingAfter === (string) $singleContent->id)
+                    <div style="margin-top: 24px;">
+                        <livewire:create-content-form :moduleContentId="$moduleContent->id" :type="$addingType" :insertAfter="$singleContent->id" :inline="true" :key="'add-' . $addingType . '-' . $singleContent->id" />
+                    </div>
+                @elseif(! $loop->last)
+                    <x-block-inserter variant="between" :after="$singleContent->id" />
+                @endif
+            @endif
             </div>
         @empty
-            <div style="color: #6B7280; text-align: center; padding: 40px;">
-                No content added yet. Use "+ Add Content" above to get started.
+            <div style="color: #6B7280; text-align: center; padding: 40px 20px 24px;">
+                No content added yet.@if($this->canManage) Drop a file or paste a link below to get started.@endif
             </div>
         @endforelse
+        </div>
+
+        @if($this->canManage)
+            <div style="margin-top: 28px;">
+                @if($addingType && $addingAfter === 'end')
+                    <livewire:create-content-form :moduleContentId="$moduleContent->id" :type="$addingType" :inline="true" :key="'add-' . $addingType . '-end'" />
+                @else
+                    <x-block-inserter variant="bar" />
+                @endif
+            </div>
+        @endif
+
+        @if($this->canManage && $removedContentId)
+            {{-- The removal only becomes permanent once this notice closes. --}}
+            <div class="cs-undo" role="status" wire:key="undo-{{ $removedContentId }}"
+                 x-data="{
+                    timer: null,
+                    init() { this.timer = setTimeout(() => $wire.purgeRemovedItems({{ $removedContentId }}), 8000); },
+                    destroy() { clearTimeout(this.timer); },
+                 }">
+                <span>Block deleted.</span>
+                <button type="button" x-on:click="clearTimeout(timer); $wire.undoDeleteContentItem()">Undo</button>
+                <button type="button" x-on:click="clearTimeout(timer); $wire.purgeRemovedItems({{ $removedContentId }})" aria-label="Dismiss" style="color: #9CA3AF; font-weight: 400;">✕</button>
+            </div>
+        @endif
 
         <div class="cs-footer" style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #E5E7EB; display: flex; justify-content: flex-end; align-items: center; gap: 12px; flex-wrap: wrap;">
             <form action="{{ route('content.toggle-complete', $moduleContent->id) }}" method="POST">

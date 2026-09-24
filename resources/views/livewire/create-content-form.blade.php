@@ -27,6 +27,18 @@ new #[Layout('layouts.app')] class extends Component
     public $contentId = null;
     public $isEditing = false;
 
+    /**
+     * Rendered inside the reading page instead of on its own. The lesson's title and date
+     * are edited in that page's header then, so the form leaves them alone.
+     */
+    public $inline = false;
+
+    /** A new block goes right after this one; null adds it at the end. */
+    public $insertAfter = null;
+
+    /** When the last autosave landed, for the "Saved" indicator. */
+    public $savedAt = null;
+
     public $label = '';
     /** Day the learner should start on this content. Blank means "no planned date". */
     public $studyAt = '';
@@ -38,6 +50,10 @@ new #[Layout('layouts.app')] class extends Component
     public $pdfEndPage = '';
     public $pdfStartPercentage = 0;
     public $pdfEndPercentage = 100;
+    /** Most PDFs are shown as whole pages, so cropping stays hidden until asked for. */
+    public $pdfCropEnabled = false;
+    /** Reported by the preview once the PDF loads; only used to bound the page inputs. */
+    public $pdfPageCount = null;
 
     public $videoFileId = '';
     public $videoSourceType = 'file'; // 'file' or 'url'
@@ -70,8 +86,14 @@ new #[Layout('layouts.app')] class extends Component
     /** Times students can book straight away. Empty means they request a time instead. */
     public $sessionSlots = [];
 
-    public function mount($moduleContentId, $contentId = null)
+    public function mount($moduleContentId, $contentId = null, $inline = false, $type = null, $insertAfter = null)
     {
+        $this->inline = (bool) $inline;
+        $this->insertAfter = $insertAfter ?? request()->query('after');
+        if ($type) {
+            $this->type = $type;
+        }
+
         $moduleContent = ModuleContent::findOrFail($moduleContentId);
 
         abort_unless(
@@ -157,6 +179,7 @@ new #[Layout('layouts.app')] class extends Component
             $this->pdfEndPage = $contentable->end_position;
             $this->pdfStartPercentage = $contentable->start_percentage ?? 0;
             $this->pdfEndPercentage = $contentable->end_percentage ?? 100;
+            $this->pdfCropEnabled = (int) $this->pdfStartPercentage > 0 || (int) $this->pdfEndPercentage < 100;
             $file = $resolveFile($contentable->file_url);
             $this->pdfFileId = $file?->id ?? '';
         } elseif ($contentable instanceof VideoContent) {
@@ -254,17 +277,116 @@ new #[Layout('layouts.app')] class extends Component
             }
         }
 
-        $pdfPreviewFields = ['pdfStartPage', 'pdfEndPage', 'pdfStartPercentage', 'pdfEndPercentage', 'pdfFileId'];
+        // Live-bound fields report themselves here; the rest are autosaved from the page.
+        if ($this->isEditing && ! in_array($name, ['pdfPageCount', 'savedAt'], true)) {
+            $this->autosave();
+        }
+
+        // A different document starts from its first page again, with a page count still to come.
+        if ($name === 'pdfFileId') {
+            $this->pdfPageCount = null;
+            $this->pdfStartPage = '';
+            $this->pdfEndPage = '';
+        }
+
+        // Switching cropping off means whole pages again, not a hidden crop still applied.
+        if ($name === 'pdfCropEnabled' && ! $this->pdfCropEnabled) {
+            $this->pdfStartPercentage = 0;
+            $this->pdfEndPercentage = 100;
+        }
+
+        $pdfPreviewFields = ['pdfStartPage', 'pdfEndPage', 'pdfStartPercentage', 'pdfEndPercentage', 'pdfFileId', 'pdfCropEnabled'];
 
         if ($name === 'type' || ($this->type === 'pdf' && in_array($name, $pdfPreviewFields))) {
-            $this->dispatch('pdf-preview-changed',
-                url: $this->type === 'pdf' ? $this->pdfPreviewUrl() : null,
-                startPage: $this->pdfStartPage,
-                endPage: $this->pdfEndPage,
-                startPercent: (int) $this->pdfStartPercentage,
-                endPercent: (int) $this->pdfEndPercentage,
-            );
+            $this->dispatch('pdf-preview-changed', ...$this->pdfPreviewState());
         }
+
+        $videoPreviewFields = ['videoFileId', 'videoSourceType', 'videoExternalUrl', 'videoStartTime', 'videoEndTime'];
+
+        if ($name === 'type' || ($this->type === 'video' && in_array($name, $videoPreviewFields))) {
+            $this->dispatch('video-preview-changed', ...$this->videoPreviewState());
+        }
+    }
+
+    /**
+     * What the video preview plays: the picked file or the pasted link, with the start and
+     * end times as seconds (null when blank or not a time yet).
+     */
+    public function videoPreviewState(): array
+    {
+        $url = null;
+
+        if ($this->type === 'video') {
+            if ($this->videoSourceType === 'file') {
+                $file = $this->videoFileId ? File::ownedBy(auth()->user())->find($this->videoFileId) : null;
+                $url = $file ? asset('storage/' . $file->file_path) : null;
+            } elseif (filter_var(trim((string) $this->videoExternalUrl), FILTER_VALIDATE_URL)) {
+                $url = trim((string) $this->videoExternalUrl);
+            }
+        }
+
+        return [
+            'url' => $url,
+            'youtubeId' => \App\Support\QuickBlock::youtubeId($url),
+            'start' => $this->secondsFrom($this->videoStartTime),
+            'end' => $this->secondsFrom($this->videoEndTime),
+        ];
+    }
+
+    /** Times the student player understands: minutes:seconds or hours:minutes:seconds. */
+    private const VIDEO_TIME_PATTERN = '/^\d+:[0-5]\d(:[0-5]\d)?$/';
+
+    /** "01:20" or "1:02:03" as seconds; null for anything the player would ignore. */
+    private function secondsFrom($time): ?int
+    {
+        $time = trim((string) $time);
+
+        if (! preg_match(self::VIDEO_TIME_PATTERN, $time)) {
+            return null;
+        }
+
+        return array_reduce(explode(':', $time), fn ($total, $part) => $total * 60 + (int) $part, 0);
+    }
+
+    public function messages(): array
+    {
+        return [
+            'videoStartTime.regex' => 'Use minutes:seconds, like 01:20 (or 1:02:03 for hours).',
+            'videoEndTime.regex' => 'Use minutes:seconds, like 05:30 (or 1:02:03 for hours).',
+        ];
+    }
+
+    private function videoTimeRules(): array
+    {
+        return [
+            'videoStartTime' => ['nullable', 'string', 'regex:' . self::VIDEO_TIME_PATTERN],
+            'videoEndTime' => ['nullable', 'string', 'regex:' . self::VIDEO_TIME_PATTERN],
+        ];
+    }
+
+    private function checkVideoTimeOrder(): void
+    {
+        $start = $this->secondsFrom($this->videoStartTime);
+        $end = $this->secondsFrom($this->videoEndTime);
+
+        if ($start !== null && $end !== null && $end <= $start) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'videoEndTime' => 'The end time has to come after the start time.',
+            ]);
+        }
+    }
+
+    /** Everything the preview needs to draw the current page range and crop. */
+    public function pdfPreviewState(): array
+    {
+        return [
+            'url' => $this->type === 'pdf' ? $this->pdfPreviewUrl() : null,
+            'startPage' => $this->pdfStartPage,
+            'endPage' => $this->pdfEndPage,
+            'startPercent' => (int) $this->pdfStartPercentage,
+            'endPercent' => (int) $this->pdfEndPercentage,
+            'cropEditing' => (bool) $this->pdfCropEnabled,
+        ];
     }
 
     public function addQuestion()
@@ -321,6 +443,62 @@ new #[Layout('layouts.app')] class extends Component
 
     public function save()
     {
+        if (! $this->persist()) {
+            return;
+        }
+
+        if ($this->inline) {
+            $this->dispatch('content-editor-closed');
+            return;
+        }
+
+        return redirect()->route('content.show', $this->moduleContentId);
+    }
+
+    /**
+     * Editing saves as you go: the page calls this a moment after each change. A change
+     * that doesn't validate yet just isn't saved, and the errors say why.
+     */
+    public function autosave()
+    {
+        if (! $this->isEditing) {
+            return;
+        }
+
+        // The reading page catches up when the editor closes: refreshing it mid-edit
+        // would redraw this form's PDF preview out from under the author.
+        if ($this->persist()) {
+            $this->savedAt = now()->format('H:i');
+        }
+    }
+
+    /** Leaves the inline editor; anything valid is already saved. */
+    public function done()
+    {
+        if ($this->isEditing && ! $this->persist()) {
+            return;
+        }
+
+        if ($this->inline) {
+            $this->dispatch('content-editor-closed');
+            return;
+        }
+
+        return redirect()->route('content.show', $this->moduleContentId);
+    }
+
+    public function cancel()
+    {
+        if ($this->inline) {
+            $this->dispatch('content-editor-closed');
+            return;
+        }
+
+        return redirect()->route('content.show', $this->moduleContentId);
+    }
+
+    private function persist(): bool
+    {
         $this->validate([
             'label' => 'required|string|max:255',
             'studyAt' => 'nullable|date',
@@ -343,9 +521,23 @@ new #[Layout('layouts.app')] class extends Component
         } elseif ($this->type === 'pdf') {
             $this->validate([
                 'pdfFileId' => ['required', $this->ownedFileRule()],
-                'pdfStartPage' => 'nullable|string',
-                'pdfEndPage' => 'nullable|string',
+                'pdfStartPage' => ['nullable', 'integer', 'min:1', ...($this->pdfPageCount ? ['max:' . (int) $this->pdfPageCount] : [])],
+                'pdfEndPage' => ['nullable', 'integer', 'min:1', ...($this->pdfPageCount ? ['max:' . (int) $this->pdfPageCount] : [])],
+            ], [
+                'pdfStartPage.max' => 'This PDF only has :max pages.',
+                'pdfEndPage.max' => 'This PDF only has :max pages.',
             ]);
+
+            if ($this->pdfStartPage !== '' && $this->pdfStartPage !== null && $this->pdfEndPage !== '' && $this->pdfEndPage !== null
+                && (int) $this->pdfEndPage < (int) $this->pdfStartPage) {
+                $this->addError('pdfEndPage', 'The last page can\'t come before the first page.');
+                return false;
+            }
+
+            if (! $this->pdfCropEnabled) {
+                $this->pdfStartPercentage = 0;
+                $this->pdfEndPercentage = 100;
+            }
 
             $file = File::ownedBy(auth()->user())->find($this->pdfFileId);
 
@@ -357,14 +549,15 @@ new #[Layout('layouts.app')] class extends Component
             if ($this->pdfStartPage !== '' && $this->pdfEndPage !== '' && (int) $this->pdfStartPage === (int) $this->pdfEndPage
                 && (int) $this->pdfEndPercentage <= (int) $this->pdfStartPercentage) {
                 $this->addError('pdfEndPercentage', 'End crop percentage must be greater than start crop percentage when start and end page are the same.');
-                return;
+                return false;
             }
 
             $contentable = $existingContentable ?: new PdfNotesContent();
             $contentable->name = $this->label;
             $contentable->file_url = asset('storage/' . $file->file_path);
-            $contentable->start_position = $this->pdfStartPage;
-            $contentable->end_position = $this->pdfEndPage;
+            // Blank means "from the first page" / "to the last page".
+            $contentable->start_position = $this->pdfStartPage === '' ? null : $this->pdfStartPage;
+            $contentable->end_position = $this->pdfEndPage === '' ? null : $this->pdfEndPage;
             $contentable->start_percentage = $this->pdfStartPercentage !== '' ? (int) $this->pdfStartPercentage : 0;
             $contentable->end_percentage = $this->pdfEndPercentage !== '' ? (int) $this->pdfEndPercentage : 100;
             $contentable->save();
@@ -373,10 +566,10 @@ new #[Layout('layouts.app')] class extends Component
             if ($this->videoSourceType === 'file') {
                 $this->validate([
                     'videoFileId' => ['required', $this->ownedFileRule()],
-                    'videoStartTime' => 'nullable|string',
-                    'videoEndTime' => 'nullable|string',
+                    ...$this->videoTimeRules(),
                 ]);
 
+                $this->checkVideoTimeOrder();
                 $file = File::ownedBy(auth()->user())->find($this->videoFileId);
                 $fileUrl = asset('storage/' . $file->file_path);
                 $startTime = $this->videoStartTime;
@@ -384,10 +577,10 @@ new #[Layout('layouts.app')] class extends Component
             } else {
                 $this->validate([
                     'videoExternalUrl' => 'required|url',
-                    'videoStartTime' => 'nullable|string',
-                    'videoEndTime' => 'nullable|string',
+                    ...$this->videoTimeRules(),
                 ]);
 
+                $this->checkVideoTimeOrder();
                 // Played straight from the link (YouTube or a direct file): never copied to this server.
                 $fileUrl = $this->videoExternalUrl;
                 $startTime = $this->videoStartTime;
@@ -498,8 +691,10 @@ new #[Layout('layouts.app')] class extends Component
 
         if ($this->isEditing) {
             $moduleContent = ModuleContent::findOrFail($this->moduleContentId);
-            $moduleContent->label = $this->label;
-            $moduleContent->study_at = $this->studyAt ?: null;
+            if (! $this->inline) {
+                $moduleContent->label = $this->label;
+                $moduleContent->study_at = $this->studyAt ?: null;
+            }
             if (!$moduleContent->slug) {
                 $moduleContent->slug = \Illuminate\Support\Str::slug($this->label . '-' . time());
             }
@@ -516,24 +711,26 @@ new #[Layout('layouts.app')] class extends Component
             if (!$moduleContent->label) {
                 $moduleContent->label = $this->label;
             }
-            $moduleContent->study_at = $this->studyAt ?: null;
+            if (! $this->inline) {
+                $moduleContent->study_at = $this->studyAt ?: null;
+            }
             if (!$moduleContent->slug) {
                 $moduleContent->slug = \Illuminate\Support\Str::slug($this->label . '-' . time());
             }
             $moduleContent->save();
 
-            $maxOrder = \Illuminate\Support\Facades\DB::table('content_module_content')
-                ->where('module_content_id', $moduleContent->id)
-                ->max('sort_order') ?? 0;
-
-            $moduleContent->contents()->attach($content->id, ['sort_order' => $maxOrder + 1, 'is_exercise' => $this->isExercise]);
+            $moduleContent->addBlock($content, (bool) $this->isExercise, $this->insertAfter);
 
             // Announce it to the classes taking this course. Editing stays quiet:
             // only genuinely new content is worth an email.
             \App\Jobs\NotifyClassOfNewContent::dispatch($moduleContent->id, $content->id, auth()->id());
+
+            // Anything after this edits the block just made, rather than adding another.
+            $this->contentId = $content->id;
+            $this->isEditing = true;
         }
 
-        return redirect()->route('content.show', $this->moduleContentId);
+        return true;
     }
     
 
@@ -541,14 +738,60 @@ new #[Layout('layouts.app')] class extends Component
 
 ?>
 
-<div style="width: 100%; height: 100%; overflow-y: auto;">
-<x-pdf-viewer-engine />
-<div class="max-w-8xl mx-auto mt-10 mb-10" style="display: flex; align-items: flex-start; gap: 24px; padding: 0 24px;">
+<div class="ccf-root {{ $inline ? 'ccf-inline' : '' }}" style="{{ $inline ? 'width: 100%;' : 'width: 100%; height: 100%; overflow-y: auto;' }}">
+{{-- The engine prints its scripts only once per response, so it is there on some renders
+     and not others (inline, the reading page may have printed it already). Its own keyed
+     wrapper, and the keys below, keep that from shifting how Livewire matches the rest,
+     which would otherwise replace the wire:ignore'd preview mid-edit. --}}
+<div wire:key="ccf-engine"><x-pdf-viewer-engine /></div>
+<style>
+    .ccf-layout { display: flex; align-items: flex-start; gap: 24px; }
+    /* Inline, the form sits side by side with the PDF preview too, and only stacks once
+       the reading column itself (not the window) gets too narrow for two columns. */
+    .ccf-inline { container-type: inline-size; }
+    @container (max-width: 760px) {
+        .ccf-layout { flex-direction: column; align-items: stretch; }
+        .ccf-preview { width: 100% !important; position: static !important; }
+    }
+    @media (max-width: 900px) {
+        .ccf-layout { flex-direction: column; align-items: stretch; }
+        .ccf-preview { width: 100% !important; position: static !important; }
+    }
+    .ccf-status { font-size: 12px; font-weight: 500; color: #6B7280; display: inline-flex; align-items: center; gap: 6px; }
+    .ccf-status-dot { width: 7px; height: 7px; border-radius: 999px; background: currentColor; }
+    .ccf-num { width: 80px; padding: 4px 6px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 13px; outline: none; }
+    .ccf-num:focus { border-color: #6366F1; box-shadow: 0 0 0 2px rgba(99, 102, 241, .15); }
+    .ccf-mark { font: inherit; font-size: 12px; font-weight: 600; color: #4338CA; background: #EEF2FF; border: 1px solid #C7D2FE; border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+    .ccf-mark:hover { background: #E0E7FF; }
+    .ccf-switch { position: relative; width: 36px; height: 20px; border-radius: 999px; background: #D1D5DB; transition: background .15s ease; flex-shrink: 0; }
+    .ccf-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 999px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: transform .15s ease; }
+    .ccf-switch[data-on="true"] { background: #4F46E5; }
+    .ccf-switch[data-on="true"]::after { transform: translateX(16px); }
+</style>
+<div wire:key="ccf-layout" class="ccf-layout {{ $inline ? '' : 'max-w-8xl mx-auto mt-10 mb-10' }}" style="{{ $inline ? '' : 'padding: 0 24px;' }}">
 
-<div class="flex-1 min-w-0 p-6 bg-white shadow-md rounded-lg border border-gray-200">
+<div class="flex-1 min-w-0 p-6 bg-white rounded-lg border {{ $inline ? 'border-indigo-200' : 'shadow-md border-gray-200' }}"
+     x-data="{
+        {{-- Deferred fields are sent along with this call. Live-bound ones save themselves
+             server side, and the form's own buttons do their own saving. --}}
+        maybeAutosave(event) {
+            if (! $wire.isEditing) return;
+            const target = event.target;
+            if (! target || target.closest('[data-no-autosave]')) return;
+            if ([...(target.attributes || [])].some(a => a.name.startsWith('wire:model.live'))) return;
+            $wire.autosave();
+        },
+     }"
+     x-on:input.debounce.800ms="maybeAutosave($event)"
+     x-on:change.debounce.800ms="maybeAutosave($event)"
+     x-on:click.debounce.800ms="$event.target.closest('button[wire\\:click]') && maybeAutosave($event)">
 
-    <div class="flex justify-between items-center mb-6">
-        <h1 class="text-2xl font-bold text-gray-800">{{ $isEditing ? 'Edit Content' : 'Add Content to Module' }}</h1>
+    <div class="flex justify-between items-center mb-6" style="gap: 12px; flex-wrap: wrap;">
+        @if($inline)
+            <h2 class="text-base font-semibold text-gray-800" style="margin: 0;">{{ $isEditing ? 'Editing this block' : 'New block' }}</h2>
+        @else
+            <h1 class="text-2xl font-bold text-gray-800">{{ $isEditing ? 'Edit Content' : 'Add Content to Module' }}</h1>
+        @endif
 
         <select wire:model.live="type" @disabled($isEditing) class="border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;">
             <option value="note">Text Note</option>
@@ -562,6 +805,7 @@ new #[Layout('layouts.app')] class extends Component
         </select>
     </div>
     
+    @if(! $inline || trim((string) $label) === '')
     <div class="mb-4">
         <label class="block text-sm font-medium text-gray-700 mb-1">Content Label</label>
         <input type="text" wire:model="label" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="e.g. Introduction Note">
@@ -574,6 +818,7 @@ new #[Layout('layouts.app')] class extends Component
         <p class="text-xs text-gray-500 mt-1">When learners should start reading or studying this content. Leave blank for no planned date.</p>
         @error('studyAt') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
     </div>
+    @endif
 
     @if(isset($type))
 
@@ -592,34 +837,63 @@ new #[Layout('layouts.app')] class extends Component
 
             <div class="flex gap-4 mb-4">
                 <div class="w-1/2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Read From Page (Optional)</label>
-                    <input type="text" wire:model.live.debounce.500ms="pdfStartPage" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="e.g. 5">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">From page</label>
+                    <input type="number" inputmode="numeric" min="1" @if($pdfPageCount) max="{{ $pdfPageCount }}" @endif step="1"
+                           wire:model.live.debounce.500ms="pdfStartPage"
+                           class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;"
+                           placeholder="1">
                     @error('pdfStartPage') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
                 </div>
                 <div class="w-1/2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Read To Page (Optional)</label>
-                    <input type="text" wire:model.live.debounce.500ms="pdfEndPage" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="e.g. 10">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">To page</label>
+                    <input type="number" inputmode="numeric" min="1" @if($pdfPageCount) max="{{ $pdfPageCount }}" @endif step="1"
+                           wire:model.live.debounce.500ms="pdfEndPage"
+                           class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;"
+                           placeholder="{{ $pdfPageCount ?: 'Last page' }}">
                     @error('pdfEndPage') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
                 </div>
             </div>
+            <p class="text-xs text-gray-500" style="margin: -8px 0 16px;">
+                Leave these empty to show the whole document{{ $pdfPageCount ? ' (pages 1–' . $pdfPageCount . ')' : '' }}.
+            </p>
 
-            <div class="flex gap-4 mb-6">
-                <div class="w-1/2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">
-                        Start Page &mdash; Show From <span class="font-semibold text-indigo-600">{{ $pdfStartPercentage }}%</span> Down
-                    </label>
-                    <input type="range" min="0" max="100" step="1" wire:model.live.debounce.300ms="pdfStartPercentage" class="w-full">
-                    <p class="text-xs text-gray-500 mt-1">Crops the top of the first page shown. 0% shows the whole page from the top.</p>
-                    @error('pdfStartPercentage') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
-                </div>
-                <div class="w-1/2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">
-                        End Page &mdash; Show Up To <span class="font-semibold text-indigo-600">{{ $pdfEndPercentage }}%</span> Down
-                    </label>
-                    <input type="range" min="0" max="100" step="1" wire:model.live.debounce.300ms="pdfEndPercentage" class="w-full">
-                    <p class="text-xs text-gray-500 mt-1">Crops the bottom of the last page shown. 100% shows the whole page to the bottom.</p>
-                    @error('pdfEndPercentage') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
-                </div>
+            <div class="mb-6">
+                <label class="inline-flex items-center cursor-pointer" style="gap: 10px;">
+                    <input type="checkbox" wire:model.live="pdfCropEnabled" class="sr-only" style="position: absolute; opacity: 0; width: 1px; height: 1px;">
+                    <span class="ccf-switch" data-on="{{ $pdfCropEnabled ? 'true' : 'false' }}" aria-hidden="true"></span>
+                    <span class="text-sm font-medium text-gray-700">Crop pages</span>
+                </label>
+                <p class="text-xs text-gray-500 mt-1">Start partway down the first page or stop partway down the last one.</p>
+
+                @if($pdfCropEnabled)
+                    <p class="text-xs mt-3" style="color: #4338CA; background: #EEF2FF; border: 1px solid #C7D2FE; border-radius: 6px; padding: 6px 10px;">
+                        Drag the handles on the preview's first and last pages, or type exact values below.
+                    </p>
+                    <div class="flex gap-4 mt-3">
+                        <div class="w-1/2">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">First page starts at</label>
+                            <div class="flex items-center gap-3">
+                                <input type="range" min="0" max="100" step="1" wire:model.live.debounce.300ms="pdfStartPercentage" class="flex-1">
+                                <span class="flex items-center gap-1">
+                                    <input type="number" min="0" max="100" step="1" wire:model.live.debounce.500ms="pdfStartPercentage" class="ccf-num" aria-label="First page starts at, percent">
+                                    <span class="text-sm text-gray-500">%</span>
+                                </span>
+                            </div>
+                            @error('pdfStartPercentage') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+                        </div>
+                        <div class="w-1/2">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Last page ends at</label>
+                            <div class="flex items-center gap-3">
+                                <input type="range" min="0" max="100" step="1" wire:model.live.debounce.300ms="pdfEndPercentage" class="flex-1">
+                                <span class="flex items-center gap-1">
+                                    <input type="number" min="0" max="100" step="1" wire:model.live.debounce.500ms="pdfEndPercentage" class="ccf-num" aria-label="Last page ends at, percent">
+                                    <span class="text-sm text-gray-500">%</span>
+                                </span>
+                            </div>
+                            @error('pdfEndPercentage') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+                        </div>
+                    </div>
+                @endif
             </div>
 
         @elseif($type === 'video')
@@ -648,7 +922,7 @@ new #[Layout('layouts.app')] class extends Component
             @else
                 <div class="mb-4">
                     <label class="block text-sm font-medium text-gray-700 mb-1">Video URL (YouTube link, MP4 link, etc.)</label>
-                    <input type="url" wire:model="videoExternalUrl" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="https://www.youtube.com/watch?v=...">
+                    <input type="url" wire:model.live.debounce.600ms="videoExternalUrl" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="https://www.youtube.com/watch?v=...">
                     @error('videoExternalUrl') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
                     <p class="text-xs text-gray-500 mt-1">Saves right away and plays from the link. A copy is fetched in the background and takes over once it is ready.</p>
                 </div>
@@ -657,12 +931,12 @@ new #[Layout('layouts.app')] class extends Component
             <div class="flex gap-4 mb-6">
                 <div class="w-1/2">
                     <label class="block text-sm font-medium text-gray-700 mb-1">Start Time (Optional, e.g. 01:20)</label>
-                    <input type="text" wire:model="videoStartTime" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="00:00">
+                    <input type="text" wire:model.live.debounce.600ms="videoStartTime" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="00:00">
                     @error('videoStartTime') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
                 </div>
                 <div class="w-1/2">
                     <label class="block text-sm font-medium text-gray-700 mb-1">End Time (Optional, e.g. 05:30)</label>
-                    <input type="text" wire:model="videoEndTime" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="00:00">
+                    <input type="text" wire:model.live.debounce.600ms="videoEndTime" class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 p-2 border" style="outline: none;" placeholder="00:00">
                     @error('videoEndTime') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
                 </div>
             </div>
@@ -900,13 +1174,40 @@ new #[Layout('layouts.app')] class extends Component
         <p class="text-xs text-gray-500 mt-1 ml-6">Exercises require students to upload a file or submit an answer link before completing.</p>
     </div>
 
-    <div class="flex justify-end space-x-3 gap-3">
-        <a href="{{ route('content.show', $moduleContentId) }}" class="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 text-decoration-none inline-block">Cancel</a>
-        <button wire:click="save" class="px-4 py-2 bg-indigo-600 border border-transparent rounded-md text-sm font-medium text-white hover:bg-indigo-700 cursor-pointer border-0">{{ $isEditing ? 'Update Content' : 'Save Content' }}</button>
+    <div class="flex items-center justify-between gap-3" style="flex-wrap: wrap;">
+        <div>
+            @if($isEditing)
+                <span class="ccf-status" wire:loading.flex wire:target="autosave, done, pdfStartPage, pdfEndPage, pdfStartPercentage, pdfEndPercentage, pdfCropEnabled, pdfFileId, videoFileId, imageFileId" style="color: #6B7280;">
+                    <span class="ccf-status-dot"></span> Saving…
+                </span>
+                <span class="ccf-status" wire:loading.remove wire:target="autosave, done, pdfStartPage, pdfEndPage, pdfStartPercentage, pdfEndPercentage, pdfCropEnabled, pdfFileId, videoFileId, imageFileId"
+                      style="color: {{ $errors->any() ? '#B91C1C' : '#047857' }};">
+                    <span class="ccf-status-dot"></span>
+                    @if($errors->any())
+                        Not saved: fix the highlighted fields
+                    @elseif($savedAt)
+                        Saved at {{ $savedAt }}
+                    @else
+                        Changes save automatically
+                    @endif
+                </span>
+            @endif
+        </div>
+
+        <div class="flex justify-end gap-3" data-no-autosave>
+            @if($isEditing)
+                <button type="button" wire:click="done" class="px-4 py-2 bg-indigo-600 border border-transparent rounded-md text-sm font-medium text-white hover:bg-indigo-700 cursor-pointer border-0">Done</button>
+            @else
+                <button type="button" wire:click="cancel" class="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer" style="background: white;">Cancel</button>
+                <button type="button" wire:click="save" class="px-4 py-2 bg-indigo-600 border border-transparent rounded-md text-sm font-medium text-white hover:bg-indigo-700 cursor-pointer border-0">{{ $inline ? 'Add block' : 'Save Content' }}</button>
+            @endif
+        </div>
     </div>
 </div>
 
-<div class="{{ $type === 'pdf' ? 'w-[50%]' : 'hidden' }}" style=" flex-shrink: 0; position: sticky; top: 24px;">
+<div wire:key="ccf-preview" class="ccf-preview {{ in_array($type, ['pdf', 'video'], true) ? 'w-[50%]' : 'hidden' }}" style=" flex-shrink: 0; position: sticky; top: 24px;">
+    {{-- Shown and hidden from out here: wire:ignore'd elements keep whatever class they started with. --}}
+    <div wire:key="ccf-pdf-preview" class="{{ $type === 'pdf' ? '' : 'hidden' }}">
     <div class="p-4 bg-white shadow-md rounded-lg border border-gray-200" wire:ignore id="pdf-form-preview-wrapper">
         <label class="block text-sm font-medium text-gray-700 mb-2">
             Preview <span class="font-normal text-gray-500">(how this will appear to students)</span>
@@ -932,6 +1233,96 @@ new #[Layout('layouts.app')] class extends Component
                 </div>
             </div>
         </div>
+    </div>
+    </div>
+
+    <div wire:key="ccf-video-preview" class="{{ $type === 'video' ? '' : 'hidden' }}">
+    <div class="p-4 bg-white shadow-md rounded-lg border border-gray-200" wire:ignore id="video-form-preview"
+         x-data="{
+            ...@js($this->videoPreviewState()),
+            current: 0,
+            duration: 0,
+            // A YouTube embed reloads for a new start or end; a video element just seeks.
+            get embedUrl() {
+                if (!this.youtubeId) return '';
+                const params = new URLSearchParams({ rel: '0' });
+                if (this.start) params.set('start', this.start);
+                if (this.end) params.set('end', this.end);
+                return 'https://www.youtube-nocookie.com/embed/' + this.youtubeId + '?' + params;
+            },
+            get problem() {
+                if (this.start !== null && this.end !== null && this.end <= this.start) return 'The end time has to come after the start time.';
+                if (this.duration && this.start !== null && this.start >= this.duration) return 'The start time is past the end of the video.';
+                return '';
+            },
+            clock(seconds) {
+                seconds = Math.max(0, Math.floor(seconds || 0));
+                const h = Math.floor(seconds / 3600), m = Math.floor(seconds % 3600 / 60), s = seconds % 60;
+                const pad = n => String(n).padStart(2, '0');
+                return h ? h + ':' + pad(m) + ':' + pad(s) : pad(m) + ':' + pad(s);
+            },
+            get range() {
+                const from = this.start || 0;
+                const to = this.end ?? (this.duration || null);
+                if (to === null) return 'Plays from ' + this.clock(from) + ' to the end';
+                return 'Plays ' + this.clock(from) + ' → ' + this.clock(to) + ' (' + this.clock(Math.max(0, to - from)) + ')';
+            },
+            update(state) {
+                const sourceChanged = state.url !== this.url;
+                Object.assign(this, state);
+                if (sourceChanged) { this.duration = 0; this.current = 0; }
+                else this.$nextTick(() => this.toStart());
+            },
+            toStart() {
+                const video = this.$refs.video;
+                if (video && video.readyState > 0) video.currentTime = this.start || 0;
+            },
+            ticked() {
+                const video = this.$refs.video;
+                this.current = video.currentTime;
+                // Stop where students' playback will stop.
+                if (this.end !== null && video.currentTime >= this.end && !video.paused) video.pause();
+            },
+            mark(which) {
+                $wire.set(which === 'start' ? 'videoStartTime' : 'videoEndTime', this.clock(this.current));
+            },
+         }"
+         x-on:video-preview-changed.window="update($event.detail)">
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+            Preview <span class="font-normal text-gray-500">(how this will appear to students)</span>
+        </label>
+
+        <template x-if="!url">
+            <div style="aspect-ratio: 16 / 9; display: flex; align-items: center; justify-content: center; background: #F3F4F6; border: 1px solid #E5E7EB; border-radius: 8px; color: #9CA3AF; font-size: 13px; font-weight: 500; text-align: center; padding: 16px;">
+                Choose a video or paste a link to preview it here.
+            </div>
+        </template>
+
+        <template x-if="url && youtubeId">
+            <div style="aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: #000;">
+                <iframe :src="embedUrl" style="width: 100%; height: 100%; border: 0;" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen title="Video preview"></iframe>
+            </div>
+        </template>
+
+        <template x-if="url && !youtubeId">
+            <div>
+                <video x-ref="video" :src="url" controls preload="metadata" playsinline
+                       style="display: block; width: 100%; max-height: 55vh; background: #000; border-radius: 8px;"
+                       x-on:loadedmetadata="duration = $event.target.duration; toStart()"
+                       x-on:timeupdate="ticked()"></video>
+
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px;">
+                    <span style="font: 600 12px/1 monospace; color: #111827; background: #F3F4F6; border: 1px solid #E5E7EB; border-radius: 999px; padding: 5px 10px;" x-text="clock(current)"></span>
+                    <button type="button" data-no-autosave x-on:click="mark('start')" class="ccf-mark">Set start here</button>
+                    <button type="button" data-no-autosave x-on:click="mark('end')" class="ccf-mark">Set end here</button>
+                    <button type="button" data-no-autosave x-on:click="toStart(); $refs.video.play()" class="ccf-mark">Play from start</button>
+                </div>
+            </div>
+        </template>
+
+        <p x-show="url && !problem" style="margin: 10px 0 0; font-size: 12px; color: #4B5563;" x-text="range"></p>
+        <p x-show="problem" x-cloak style="margin: 10px 0 0; font-size: 12px; color: #B91C1C;" x-text="problem"></p>
+    </div>
     </div>
 </div>
 
@@ -1019,19 +1410,39 @@ new #[Layout('layouts.app')] class extends Component
             });
         }
 
+        // Only the crop moved: adjust the drawn pages in place instead of rebuilding them,
+        // so a drag or a typed percentage doesn't make the preview jump back to the top.
+        let shown = null;
+
         function show(pdf, data) {
-            pdfViewer().setDocument(pdf, {
+            const range = {
                 startPage: data.startPage ? parseInt(data.startPage) : 1,
                 endPage: data.endPage ? parseInt(data.endPage) : null,
                 startPercent: data.startPercent,
-                endPercent: data.endPercent
-            });
+                endPercent: data.endPercent,
+                cropEditing: !!data.cropEditing,
+                onCropChange: onCropDragged,
+            };
+
+            if (shown && shown.pdf === pdf && shown.startPage === range.startPage && shown.endPage === range.endPage) {
+                pdfViewer().setCrop(range.startPercent, range.endPercent, range.cropEditing);
+            } else {
+                pdfViewer().setDocument(pdf, range);
+            }
+
+            shown = {pdf: pdf, startPage: range.startPage, endPage: range.endPage};
+        }
+
+        // A handle dragged on the preview becomes the same value the slider sets.
+        function onCropDragged(which, percent) {
+            $wire.set(which === 'start' ? 'pdfStartPercentage' : 'pdfEndPercentage', Math.round(percent));
         }
 
         function loadAndRender(data) {
             if (!data.url) {
                 currentUrl = null;
                 loadedPdf = null;
+                shown = null;
                 pageCountLabel.textContent = 'No PDF selected yet';
                 pdfViewer().message(PLACEHOLDER);
                 return;
@@ -1051,6 +1462,8 @@ new #[Layout('layouts.app')] class extends Component
             fetchPdfWithRetry(requestedUrl, 3).then(function(pdf) {
                 if (requestedUrl !== currentUrl) return;
                 loadedPdf = pdf;
+                // Bounds the page inputs; not worth a request of its own.
+                $wire.$set('pdfPageCount', pdf.numPages, false);
                 pageCountLabel.textContent = 'This PDF has ' + pdf.numPages + ' page' + (pdf.numPages === 1 ? '' : 's') + '.';
                 show(pdf, data);
             }).catch(function(err) {
@@ -1067,13 +1480,7 @@ new #[Layout('layouts.app')] class extends Component
 
         $wire.on('pdf-preview-changed', (event) => loadAndRender(event));
 
-        loadAndRender({
-            url: @js($type === 'pdf' ? $this->pdfPreviewUrl() : null),
-            startPage: @js($pdfStartPage),
-            endPage: @js($pdfEndPage),
-            startPercent: @js((int) $pdfStartPercentage),
-            endPercent: @js((int) $pdfEndPercentage),
-        });
+        loadAndRender(@js($this->pdfPreviewState()));
     })();
 </script>
 @endscript

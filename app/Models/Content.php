@@ -18,6 +18,7 @@ class Content extends Model
         return $this->belongsToMany(ModuleContent::class, 'content_module_content')
             ->using(ContentModuleContent::class)
             ->withPivot('id','sort_order', 'is_exercise')
+            ->wherePivotNull('removed_at')
             ->withTimestamps();
     }
 

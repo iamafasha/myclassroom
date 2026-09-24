@@ -66,6 +66,11 @@
                 let endPage = 1;
                 let startPercent = 0;
                 let endPercent = 100;
+                // Crop editing draws the first and last pages whole, shading what the crop
+                // hides, with a handle to drag each edge. onCropChange(which, percent) hears
+                // about a drag once it is let go.
+                let cropEditing = false;
+                let onCropChange = null;
                 let scale = 1;
                 let fitScale = 1;
                 let userZoomed = false;
@@ -114,8 +119,8 @@
 
                 function pageMetrics(num, atScale) {
                     const viewport = pageObjs[num].getViewport({scale: atScale});
-                    const topPct = (num === startPage) ? startPercent : 0;
-                    const bottomPct = (num === endPage) ? endPercent : 100;
+                    const topPct = (num === startPage && !cropEditing) ? startPercent : 0;
+                    const bottomPct = (num === endPage && !cropEditing) ? endPercent : 100;
                     return {
                         viewport: viewport,
                         topSkip: viewport.height * (topPct / 100),
@@ -447,6 +452,128 @@
                 if (window.ResizeObserver) new ResizeObserver(onResize).observe(wrapper);
                 else window.addEventListener('resize', onResize);
 
+                /* ---------- crop editing ---------- */
+
+                const SHADE_STYLE = 'position:absolute;left:0;right:0;z-index:3;background:rgba(17,24,39,0.45);pointer-events:none;';
+                const HANDLE_STYLE = 'position:absolute;left:0;right:0;z-index:4;height:22px;margin-top:-11px;cursor:ns-resize;'
+                    + 'display:flex;align-items:center;justify-content:center;touch-action:none;';
+                const GRIP_STYLE = 'height:4px;width:100%;background:#4F46E5;box-shadow:0 0 0 1px rgba(255,255,255,0.8);position:relative;';
+                // The label sits on the kept side of its line, so it stays readable at 0% and 100%.
+                const PILL_STYLE = 'position:absolute;left:50%;transform:translateX(-50%);background:#4F46E5;color:#fff;'
+                    + 'font-size:11px;font-weight:600;padding:3px 10px;border-radius:999px;white-space:nowrap;'
+                    + 'box-shadow:0 2px 6px rgba(0,0,0,0.25);font-variant-numeric:tabular-nums;';
+
+                function removeCropOverlays() {
+                    container.querySelectorAll('[data-crop-overlay]').forEach(function (el) { el.remove(); });
+                }
+
+                function positionOverlays() {
+                    const startEl = pageEls[startPage];
+                    const endEl = pageEls[endPage];
+                    if (startEl) {
+                        startEl.querySelector('[data-crop-shade="start"]').style.height = startPercent + '%';
+                        const handle = startEl.querySelector('[data-crop-handle="start"]');
+                        handle.style.top = startPercent + '%';
+                        handle.querySelector('span').textContent = 'Starts at ' + Math.round(startPercent) + '%';
+                    }
+                    if (endEl) {
+                        endEl.querySelector('[data-crop-shade="end"]').style.height = (100 - endPercent) + '%';
+                        const handle = endEl.querySelector('[data-crop-handle="end"]');
+                        handle.style.top = endPercent + '%';
+                        handle.querySelector('span').textContent = 'Ends at ' + Math.round(endPercent) + '%';
+                    }
+                }
+
+                function addCropOverlay(which) {
+                    const el = pageEls[which === 'start' ? startPage : endPage];
+                    if (!el) return;
+
+                    const shade = document.createElement('div');
+                    shade.dataset.cropOverlay = '';
+                    shade.dataset.cropShade = which;
+                    shade.setAttribute('style', SHADE_STYLE + (which === 'start' ? 'top:0;' : 'bottom:0;'));
+
+                    const handle = document.createElement('div');
+                    handle.dataset.cropOverlay = '';
+                    handle.dataset.cropHandle = which;
+                    handle.setAttribute('style', HANDLE_STYLE);
+                    handle.setAttribute('role', 'slider');
+                    handle.setAttribute('tabindex', '0');
+                    handle.setAttribute('aria-label', which === 'start' ? 'Where the first page starts' : 'Where the last page ends');
+                    // Built node by node: closing tags inside this inline script would end it early
+                    // for HTML parsers that follow the old rules (Livewire's root check among them).
+                    const grip = document.createElement('div');
+                    grip.setAttribute('style', GRIP_STYLE);
+                    const pill = document.createElement('span');
+                    pill.setAttribute('style', PILL_STYLE + (which === 'start' ? 'top:8px;' : 'bottom:8px;'));
+                    grip.appendChild(pill);
+                    handle.appendChild(grip);
+
+                    // A handle can't cross the other one when both sit on the same page.
+                    function bounded(percent) {
+                        percent = Math.max(0, Math.min(100, percent));
+                        if (startPage === endPage) {
+                            if (which === 'start') percent = Math.min(percent, endPercent - 1);
+                            else percent = Math.max(percent, startPercent + 1);
+                        }
+                        return percent;
+                    }
+
+                    function setValue(percent) {
+                        if (which === 'start') startPercent = bounded(percent);
+                        else endPercent = bounded(percent);
+                        positionOverlays();
+                    }
+
+                    function commit() {
+                        if (onCropChange) onCropChange(which, which === 'start' ? startPercent : endPercent);
+                    }
+
+                    handle.addEventListener('pointerdown', function (event) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        handle.setPointerCapture(event.pointerId);
+
+                        const move = function (moveEvent) {
+                            const rect = el.getBoundingClientRect();
+                            setValue(((moveEvent.clientY - rect.top) / rect.height) * 100);
+                        };
+                        const up = function () {
+                            handle.removeEventListener('pointermove', move);
+                            handle.removeEventListener('pointerup', up);
+                            handle.removeEventListener('pointercancel', up);
+                            commit();
+                        };
+
+                        handle.addEventListener('pointermove', move);
+                        handle.addEventListener('pointerup', up);
+                        handle.addEventListener('pointercancel', up);
+                    });
+
+                    // Arrow keys nudge by 1%, with Shift by 10%.
+                    handle.addEventListener('keydown', function (event) {
+                        const step = event.shiftKey ? 10 : 1;
+                        const current = which === 'start' ? startPercent : endPercent;
+                        if (event.key === 'ArrowUp') setValue(current - step);
+                        else if (event.key === 'ArrowDown') setValue(current + step);
+                        else return;
+                        event.preventDefault();
+                        clearTimeout(handle._commitTimer);
+                        handle._commitTimer = setTimeout(commit, 400);
+                    });
+
+                    el.appendChild(shade);
+                    el.appendChild(handle);
+                }
+
+                function drawCropOverlays() {
+                    removeCropOverlays();
+                    if (!cropEditing) return;
+                    addCropOverlay('start');
+                    addCropOverlay('end');
+                    positionOverlays();
+                }
+
                 /* ---------- public API ---------- */
 
                 function reset() {
@@ -486,6 +613,7 @@
                     fitScale = computeFitScale();
                     if (!userZoomed) scale = fitScale;
                     layoutAll();
+                    drawCropOverlays();
                     updateLevel();
                     renderVisible();
                     updateCurrentPage();
@@ -510,6 +638,8 @@
                         if (endPage > pdf.numPages) endPage = pdf.numPages;
                         startPercent = Number.isFinite(range.startPercent) ? range.startPercent : 0;
                         endPercent = Number.isFinite(range.endPercent) ? range.endPercent : 100;
+                        cropEditing = !!range.cropEditing;
+                        onCropChange = range.onCropChange || null;
 
                         reset();
 
@@ -529,6 +659,17 @@
                             if (token !== loadToken) return;
                             build();
                         });
+                    },
+
+                    /** Change only the crop (or crop editing) of the pages already shown. */
+                    setCrop: function (nextStart, nextEnd, editing) {
+                        startPercent = Number.isFinite(nextStart) ? nextStart : 0;
+                        endPercent = Number.isFinite(nextEnd) ? nextEnd : 100;
+                        cropEditing = !!editing;
+                        if (!Object.keys(pageEls).length) return;
+                        layoutAll();
+                        drawCropOverlays();
+                        requestPageUpdate();
                     },
 
                     zoomBy: function (factor) {

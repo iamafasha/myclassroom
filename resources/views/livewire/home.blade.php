@@ -216,6 +216,7 @@ new #[Layout('layouts.app')] class extends Component
             ->join('module_contents', 'module_contents.id', '=', 'content_module_content.module_content_id')
             ->where('module_contents.module_id', $module->id)
             ->where('content_module_content.is_exercise', true)
+            ->whereNull('content_module_content.removed_at')
             ->pluck('content_module_content.id');
 
         $submitted = $exercisePivots->isEmpty() ? 0 : DB::table('content_exercise_answers')
@@ -252,6 +253,7 @@ new #[Layout('layouts.app')] class extends Component
             ->join('contents', 'contents.id', '=', 'content_module_content.content_id')
             ->where('module_contents.module_id', $module->id)
             ->where('contents.contentable_type', LiveClassContent::class)
+            ->whereNull('content_module_content.removed_at')
             ->pluck('contents.contentable_id');
 
         return $ids->isEmpty() ? collect() : LiveClassContent::whereIn('id', $ids)->get();
